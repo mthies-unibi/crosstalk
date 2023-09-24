@@ -2,7 +2,7 @@
 // version.h
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2014-2020  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2014-2021  R. Stange <rsta2@o2online.de>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -20,11 +20,18 @@
 #ifndef _circle_version_h
 #define _circle_version_h
 
+#ifdef __cplusplus
+extern "C" char circle_version_string[];
+#else
+extern char circle_version_string[];
+#endif
+
 #define CIRCLE_NAME			"Circle"
 
-#define CIRCLE_MAJOR_VERSION		42
-#define CIRCLE_MINOR_VERSION		0
-#define CIRCLE_VERSION_STRING		"42"
+#define CIRCLE_MAJOR_VERSION		(__circle__ / 10000)
+#define CIRCLE_MINOR_VERSION		(__circle__ / 100 % 100)
+#define CIRCLE_PATCH_VERSION		(__circle__ % 100)
+#define CIRCLE_VERSION_STRING		circle_version_string
 
 #define OS_NAME				CIRCLE_NAME
 #define OS_VERSION			CIRCLE_VERSION_STRING

@@ -86,7 +86,8 @@ public:
         quit_signalled(false), texture_needs_update(false),
         image_name(vm_options.snapshot_name),
         m_Screen(m_Screen), ticks(0),
-	old_mouseX(0), old_mouseY(0)
+	old_mouseX(0), old_mouseY(0),
+        capslock_down(false)
     {
     }
     
@@ -160,4 +161,5 @@ private:
     std::uint16_t MyCursorSymbol[16] = {0};
     std::uint16_t MyMouseBackground[32];
     int old_mouseX, old_mouseY;
+    bool capslock_down;
 };

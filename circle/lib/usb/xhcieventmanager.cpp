@@ -2,7 +2,7 @@
 // xhcieventmanager.cpp
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2019  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2019-2022  R. Stange <rsta2@o2online.de>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -79,14 +79,14 @@ boolean CXHCIEventManager::IsValid (void)
 	return m_EventRing.IsValid () && m_pERST != 0;
 }
 
-boolean CXHCIEventManager::HandleEvents (void)
+TXHCITRB *CXHCIEventManager::HandleEvents (void)
 {
 	assert (m_pXHCIDevice != 0);
 
 	TXHCITRB *pEventTRB = m_EventRing.GetDequeueTRB ();
 	if (pEventTRB == 0)
 	{
-		return FALSE;
+		return 0;
 	}
 
 	unsigned nTRBType =    (pEventTRB->Control & XHCI_TRB_CONTROL_TRB_TYPE__MASK)
@@ -116,14 +116,19 @@ boolean CXHCIEventManager::HandleEvents (void)
 			>> XHCI_PORT_STATUS_EVENT_TRB_PARAMETER1_PORTID__SHIFT);
 		break;
 
-	case XHCI_TRB_TYPE_EVENT_HOST_CONTROLLER:
+	case XHCI_TRB_TYPE_EVENT_HOST_CONTROLLER: {
+		u8 uchCompletionCode =    pEventTRB->Status
+				       >> XHCI_EVENT_TRB_STATUS_COMPLETION_CODE__SHIFT;
+		if (uchCompletionCode == XHCI_TRB_COMPLETION_CODE_EVENT_RING_FULL_ERROR)
+		{
+			CLogger::Get ()->Write (From, LogPanic, "Event ring full");
+		}
 #ifndef NDEBUG
 		m_pXHCIDevice->DumpStatus ();
 #endif
 		CLogger::Get ()->Write (From, LogPanic, "HC event (completion %u)",
-					   (unsigned) pEventTRB->Status
-					>> XHCI_EVENT_TRB_STATUS_COMPLETION_CODE__SHIFT);
-		break;
+					(unsigned) uchCompletionCode);
+		} break;
 
 	default:
 		CLogger::Get ()->Write (From, LogPanic, "Unhandled TRB (type %u)", nTRBType);
@@ -133,10 +138,7 @@ boolean CXHCIEventManager::HandleEvents (void)
 	pEventTRB = m_EventRing.IncrementDequeue ();
 	assert (pEventTRB != 0);
 
-	m_pMMIO->rt_write64 (0, XHCI_REG_RT_IR_ERDP_LO,   XHCI_TO_DMA (pEventTRB)
-							| XHCI_REG_RT_IR_ERDP_LO_EHB);
-
-	return TRUE;
+	return pEventTRB;
 }
 
 #ifndef NDEBUG

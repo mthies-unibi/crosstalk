@@ -2,7 +2,7 @@
 // sysinit.cpp
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2014-2020  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2014-2023  R. Stange <rsta2@o2online.de>
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -27,6 +27,9 @@
 #include <circle/qemu.h>
 #include <circle/synchronize.h>
 #include <circle/sysconfig.h>
+#include <circle/memorymap.h>
+#include <circle/version.h>
+#include <circle/string.h>
 #include <circle/macros.h>
 #include <circle/util.h>
 #include <circle/types.h>
@@ -44,7 +47,7 @@ void __aeabi_atexit (void *pThis, void (*pFunc)(void *pThis), void *pHandle)
 	// TODO
 }
 
-#if AARCH == 64
+#if AARCH == 64 || defined (__clang__)
 
 void __cxa_atexit (void *pThis, void (*pFunc)(void *pThis), void *pHandle) WEAK;
 
@@ -172,15 +175,19 @@ static void vfpinit (void)
 #define VFP_FPEXC_EN	(1 << 30)
 	__asm volatile ("fmxr fpexc, %0" : : "r" (VFP_FPEXC_EN));
 
+#define VFP_FPSCR_FZ	(1 << 24)	// enable Flush-to-zero mode
 #define VFP_FPSCR_DN	(1 << 25)	// enable Default NaN mode
-	__asm volatile ("fmxr fpscr, %0" : : "r" (VFP_FPSCR_DN));
+	__asm volatile ("fmxr fpscr, %0" : : "r" (VFP_FPSCR_FZ | VFP_FPSCR_DN));
 }
 
 #endif
 
+char circle_version_string[10];
+
 void sysinit (void)
 {
 	EnableFIQs ();		// go to IRQ_LEVEL, EnterCritical() will not work otherwise
+	EnableIRQs ();		// go to TASK_LEVEL
 
 #if AARCH == 32
 #if RASPPI != 1
@@ -203,9 +210,38 @@ void sysinit (void)
 	extern unsigned char _end;
 	memset (&__bss_start, 0, &_end - &__bss_start);
 
+	// halt, if KERNEL_MAX_SIZE is not properly set
+	// cannot inform the user here
+	if (MEM_KERNEL_END < reinterpret_cast<uintptr> (&_end))
+	{
+		halt ();
+	}
+
 	CMachineInfo MachineInfo;
 
 	CMemorySystem Memory;
+
+#if RASPPI >= 4
+	MachineInfo.FetchDTB ();
+#endif
+
+	// set circle_version_string[]
+	CString Version;
+	if (CIRCLE_PATCH_VERSION)
+	{
+		Version.Format ("%d.%d.%d", CIRCLE_MAJOR_VERSION, CIRCLE_MINOR_VERSION,
+			        CIRCLE_PATCH_VERSION);
+	}
+	else if (CIRCLE_MINOR_VERSION)
+	{
+		Version.Format ("%d.%d", CIRCLE_MAJOR_VERSION, CIRCLE_MINOR_VERSION);
+	}
+	else
+	{
+		Version.Format ("%d", CIRCLE_MAJOR_VERSION);
+	}
+
+	strcpy (circle_version_string, Version);
 
 	// call constructors of static objects
 	extern void (*__init_start) (void);
@@ -238,6 +274,7 @@ void sysinit (void)
 void sysinit_secondary (void)
 {
 	EnableFIQs ();		// go to IRQ_LEVEL, EnterCritical() will not work otherwise
+	EnableIRQs ();		// go to TASK_LEVEL
 
 #if AARCH == 32
 	// L1 data cache may contain random entries after reset, delete them

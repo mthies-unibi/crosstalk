@@ -4,7 +4,7 @@
 // Configurable system options
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2014-2020  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2014-2023  R. Stange <rsta2@o2online.de>
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -36,6 +36,13 @@
 
 #ifndef KERNEL_MAX_SIZE
 #define KERNEL_MAX_SIZE		(2 * MEGABYTE)
+#endif
+
+// KERNEL_STACK_SIZE is the size of the stack set on startup for the
+// main thread.  This must be a multiple of 16 KByte.
+
+#ifndef KERNEL_STACK_SIZE
+#define KERNEL_STACK_SIZE	0x20000
 #endif
 
 // HEAP_DEFAULT_NEW defines the default heap to be used for the "new"
@@ -75,7 +82,7 @@
 // With this option you can configure the bucket sizes, so that they
 // fit best for your application needs. You have to define a comma
 // separated list of increasing bucket sizes. All sizes must be a
-// multiple of 16. Up to 20 sizes can be defined.
+// multiple of 64. Up to 20 sizes can be defined.
 
 #ifndef HEAP_BLOCK_BUCKET_SIZES
 #define HEAP_BLOCK_BUCKET_SIZES	0x40,0x400,0x1000,0x4000,0x10000,0x40000,0x80000
@@ -83,7 +90,7 @@
 
 ///////////////////////////////////////////////////////////////////////
 //
-// Raspberry Pi 1 and Zero
+// Raspberry Pi 1, Zero (W) and Zero 2 W
 //
 ///////////////////////////////////////////////////////////////////////
 
@@ -104,12 +111,25 @@
 #define GPU_L2_CACHE_ENABLED
 #endif
 
-// USE_PWM_AUDIO_ON_ZERO can be defined to use GPIO12/13 for PWM audio
-// output on RPi Zero (W). Some external circuit is needed to use this.
+#endif
+
+#if RASPPI == 1 || RASPPI == 3
+
+// USE_PWM_AUDIO_ON_ZERO can be defined to use GPIO12/13 (or 18/19) for
+// PWM audio output on RPi Zero (W) and Zero 2 W. Some external circuit
+// is needed to use this.
 // WARNING: Do not feed voltage into these GPIO pins with this option
 //          defined on a RPi Zero, because this may destroy the pins.
 
 //#define USE_PWM_AUDIO_ON_ZERO
+
+// The left PWM audio output pin is by default GPIO12. The following
+// define moves it to GPIO18.
+//#define USE_GPIO18_FOR_LEFT_PWM_ON_ZERO
+
+// The right PWM audio output pin is by default GPIO13. The following
+// define moves it to GPIO19.
+//#define USE_GPIO19_FOR_RIGHT_PWM_ON_ZERO
 
 #endif
 
@@ -153,6 +173,23 @@
 
 #endif
 
+#if RASPPI >= 4
+
+// USE_XHCI_INTERNAL enables the xHCI controller, which is integrated
+// into the BCM2711 SoC. The Raspberry Pi 4 provides two independent
+// xHCI USB host controllers, an external controller, which is connected
+// to the four USB-A sockets (USB 3.0 and 2.0) and an internal controller,
+// which is connected to the USB-C power socket (USB 2.0 only). By default
+// Circle uses the external xHCI controller. If you want to use the
+// internal controller instead, this option has to be defined. Enabling
+// this option is the only possibility to use USB on the Compute Module 4
+// with Circle. This setting requires the option "otg_mode=1" set in the
+// config.txt file too!
+
+//#define USE_XHCI_INTERNAL
+
+#endif
+
 ///////////////////////////////////////////////////////////////////////
 //
 // Timing
@@ -166,17 +203,31 @@
 
 //#define REALTIME
 
-#ifndef REALTIME
-
 // USE_USB_SOF_INTR improves the compatibility with low-/full-speed
 // USB devices. If your application uses such devices, this option
 // should normally be set. Unfortunately this causes a heavily changed
 // system timing, because it triggers up to 8000 IRQs per second. For
-// compatibility with existing applications it is not set by default.
+// USB plug-and-play operation this option must be set in any case.
 // This option has no influence on the Raspberry Pi 4.
 
-//#define USE_USB_SOF_INTR
+#ifndef NO_USB_SOF_INTR
+#define USE_USB_SOF_INTR
+#endif
 
+// USE_USB_FIQ makes the USB timing more accurate, by using the FIQ to
+// handle time-critical interrupts from the USB controller, which are
+// triggered 8000 times per second. When using the default IRQ instead,
+// USB interrupts may be delayed or entire micro-frames may be skipped,
+// when other IRQs are currently handled, which could result in
+// communication problems with some USB devices. If this option is
+// enabled, USE_USB_SOF_INTR will be enabled too, and the FIQ cannot be
+// used for other purposes. This option has no influence on the
+// Raspberry Pi 4.
+
+//#define USE_USB_FIQ
+
+#ifdef USE_USB_FIQ
+#define USE_USB_SOF_INTR
 #endif
 
 // SCREEN_DMA_BURST_LENGTH enables using DMA for scrolling the screen
@@ -216,6 +267,13 @@
 #ifndef TASK_STACK_SIZE
 #define TASK_STACK_SIZE		0x8000
 #endif
+
+// NO_BUSY_WAIT deactivates busy waiting in the EMMC, SDHOST and USB
+// drivers, while waiting for the completion of a synchronous transfer.
+// This requires the scheduler in the system and transfers must not be
+// initiated from a secondary CPU core, when this option is enabled.
+
+//#define NO_BUSY_WAIT
 
 ///////////////////////////////////////////////////////////////////////
 //
@@ -257,6 +315,14 @@
 
 //#define SCREEN_HEADLESS
 
+// USE_LOG_COLORS enables the use of different ANSI colors for different
+// severities in the system log (bright red for LogPanic, bright magenta
+// for LogError, bright yellow for LogWarning, bright white for LogNotice
+// and LogDebug). All log messages are bright white, when this option is
+// disabled, except LogPanic, which is bright red too.
+
+//#define USE_LOG_COLORS
+
 // SERIAL_GPIO_SELECT selects the TXD GPIO pin used for the serial
 // device (UART0). The RXD pin is (SERIAL_GPIO_SELECT+1). Modifying
 // this setting can be useful for Compute Modules. Select only one
@@ -270,18 +336,33 @@
 
 #endif
 
+// USE_EMBEDDED_MMC_CM enables access to the on-board embedded MMC
+// memory on Compute Modules 3+ and 4. Does not work with SD card on
+// CM3+ Lite and CM4 Lite.
+
+//#define USE_EMBEDDED_MMC_CM
+
 // USE_SDHOST selects the SDHOST device as interface for SD card
 // access. Otherwise the EMMC device is used for this purpose. The
 // SDHOST device is supported by Raspberry Pi 1-3 and Zero, but
 // not by QEMU. If you rely on a small IRQ latency, USE_SDHOST should
 // be disabled.
 
-#if RASPPI <= 3 && !defined (REALTIME)
+#if RASPPI <= 3 && !defined (REALTIME) && !defined (USE_EMBEDDED_MMC_CM)
 
 #ifndef NO_SDHOST
 #define USE_SDHOST
 #endif
 
+#endif
+
+// SD_HIGH_SPEED enables the high-speed extensions of the SD card
+// driver, which should result in a better performance with modern SD
+// cards. This is not tested that widely like the standard driver, why
+// it is presented as an option here, but is enabled by default.
+
+#ifndef NO_SD_HIGH_SPEED
+#define SD_HIGH_SPEED
 #endif
 
 // SAVE_VFP_REGS_ON_IRQ enables saving the floating point registers
@@ -313,6 +394,28 @@
 // Circle images which will run on real Raspberry Pi boards.
 
 //#define USE_QEMU_USB_FIX
+
+///////////////////////////////////////////////////////////////////////
+
+// GNU-C 12.x uses floating point registers for optimization. This may
+// occur anywhere in the code, even in IRQ and FIQ handlers.
+
+#if RASPPI >= 2 && __GNUC__ >= 12
+
+#ifndef SAVE_VFP_REGS_ON_IRQ
+#define SAVE_VFP_REGS_ON_IRQ
+#endif
+
+#ifndef SAVE_VFP_REGS_ON_FIQ
+#define SAVE_VFP_REGS_ON_FIQ
+#endif
+
+// save all VFP regs in exceptionstub.S
+#ifndef __FAST_MATH__
+#define __FAST_MATH__
+#endif
+
+#endif
 
 ///////////////////////////////////////////////////////////////////////
 

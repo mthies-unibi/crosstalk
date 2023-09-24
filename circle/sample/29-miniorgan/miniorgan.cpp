@@ -2,7 +2,7 @@
 // miniorgan.cpp
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2017  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2017-2023  R. Stange <rsta2@o2online.de>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -19,8 +19,7 @@
 //
 #include "miniorgan.h"
 #include <circle/devicenameservice.h>
-#include <circle/usb/usbmidi.h>
-#include <circle/usb/usbkeyboard.h>
+#include <circle/sysconfig.h>
 #include <circle/logger.h>
 #include <assert.h>
 
@@ -28,6 +27,9 @@
 
 #define MIDI_NOTE_OFF	0b1000
 #define MIDI_NOTE_ON	0b1001
+#define MIDI_CC		0b1011
+
+#define MIDI_CC_VOLUME	7
 
 #define KEY_NONE	255
 
@@ -70,15 +72,30 @@ const TNoteInfo CMiniOrgan::s_Keys[] =
 
 CMiniOrgan *CMiniOrgan::s_pThis = 0;
 
-CMiniOrgan::CMiniOrgan (CInterruptSystem *pInterrupt)
-:	SOUND_CLASS (pInterrupt, SAMPLE_RATE),
+CMiniOrgan::CMiniOrgan (CInterruptSystem *pInterrupt, CI2CMaster *pI2CMaster)
+#ifdef USE_USB
+:	SOUND_CLASS (SAMPLE_RATE
+#else
+:	SOUND_CLASS (pInterrupt, SAMPLE_RATE, CHUNK_SIZE
+#ifdef USE_I2S
+		     , FALSE, pI2CMaster, DAC_I2C_ADDRESS
+#endif
+#endif
+	),
+	m_pMIDIDevice (0),
+	m_pKeyboard (0),
+#if RASPPI <= 3 && defined (USE_USB_FIQ)
+	m_Serial (pInterrupt, FALSE),
+#else
 	m_Serial (pInterrupt, TRUE),
+#endif
 	m_bUseSerial (FALSE),
 	m_nSerialState (0),
 	m_nSampleCount (0),
 	m_nFrequency (0),
 	m_nPrevFrequency (0),
-	m_ucKeyNumber (KEY_NONE)
+	m_ucKeyNumber (KEY_NONE),
+	m_bSetVolume (FALSE)
 {
 	s_pThis = this;
 
@@ -95,40 +112,84 @@ CMiniOrgan::~CMiniOrgan (void)
 
 boolean CMiniOrgan::Initialize (void)
 {
-	CUSBMIDIDevice *pMIDIDevice =
-		(CUSBMIDIDevice *) CDeviceNameService::Get ()->GetDevice ("umidi1", FALSE);
-	if (pMIDIDevice != 0)
-	{
-		pMIDIDevice->RegisterPacketHandler (MIDIPacketHandler);
-
-		return TRUE;
-	}
-
-	CUSBKeyboardDevice *pKeyboard =
-		(CUSBKeyboardDevice *) CDeviceNameService::Get ()->GetDevice ("ukbd1", FALSE);
-	if (pKeyboard != 0)
-	{
-		pKeyboard->RegisterKeyStatusHandlerRaw (KeyStatusHandlerRaw);
-
-		return TRUE;
-	}
+	CLogger::Get ()->Write (FromMiniOrgan, LogNotice,
+				"Please attach an USB keyboard or use serial MIDI!");
 
 	if (m_Serial.Initialize (31250))
 	{
-		CLogger::Get ()->Write (FromMiniOrgan, LogNotice, "Using serial MIDI interface");
-
 		m_bUseSerial = TRUE;
 
 		return TRUE;
 	}
 
-	CLogger::Get ()->Write (FromMiniOrgan, LogError, "Keyboard not found");
-
 	return FALSE;
 }
 
-void CMiniOrgan::Process (void)
+void CMiniOrgan::Process (boolean bPlugAndPlayUpdated)
 {
+	// The sound controller is callable from TASK_LEVEL only. That's why we must do
+	// this here and not in MIDIPacketHandler(), which is called from IRQ_LEVEL too.
+	if (m_bSetVolume)
+	{
+		m_bSetVolume = FALSE;
+
+		// The sound controller is optional, so we check, if it exists.
+		CSoundController *pController = GetController ();
+		if (pController)
+		{
+			CSoundController::TControlInfo Info = pController->GetControlInfo (
+				CSoundController::ControlVolume, CSoundController::JackDefaultOut,
+				CSoundController::ChannelAll);
+			if (Info.Supported)
+			{
+				int nVolume = m_uchVolume;
+				nVolume *= Info.RangeMax - Info.RangeMin;
+				nVolume /= 127;
+				nVolume += Info.RangeMin;
+
+				pController->SetControl (CSoundController::ControlVolume,
+							 CSoundController::JackDefaultOut,
+							 CSoundController::ChannelAll, nVolume);
+			}
+		}
+	}
+
+	if (m_pMIDIDevice != 0)
+	{
+		return;
+	}
+
+	if (bPlugAndPlayUpdated)
+	{
+		m_pMIDIDevice =
+			(CUSBMIDIDevice *) CDeviceNameService::Get ()->GetDevice ("umidi1", FALSE);
+		if (m_pMIDIDevice != 0)
+		{
+			m_pMIDIDevice->RegisterRemovedHandler (USBDeviceRemovedHandler);
+			m_pMIDIDevice->RegisterPacketHandler (MIDIPacketHandler);
+
+			return;
+		}
+	}
+
+	if (m_pKeyboard != 0)
+	{
+		return;
+	}
+
+	if (bPlugAndPlayUpdated)
+	{
+		m_pKeyboard =
+			(CUSBKeyboardDevice *) CDeviceNameService::Get ()->GetDevice ("ukbd1", FALSE);
+		if (m_pKeyboard != 0)
+		{
+			m_pKeyboard->RegisterRemovedHandler (USBDeviceRemovedHandler);
+			m_pKeyboard->RegisterKeyStatusHandlerRaw (KeyStatusHandlerRaw);
+
+			return;
+		}
+	}
+
 	if (!m_bUseSerial)
 	{
 		return;
@@ -152,7 +213,8 @@ void CMiniOrgan::Process (void)
 		{
 		case 0:
 		MIDIRestart:
-			if ((uchData & 0xE0) == 0x80)		// Note on or off, all channels
+			if (   (uchData & 0xE0) == 0x80		// Note on or off, all channels
+			    || (uchData & 0xF0) == 0xB0)	// MIDI CC, all channels
 			{
 				m_SerialMessage[m_nSerialState++] = uchData;
 			}
@@ -184,8 +246,11 @@ void CMiniOrgan::Process (void)
 	}
 }
 
-unsigned CMiniOrgan::GetChunk (u32 *pBuffer, unsigned nChunkSize)
+#ifdef USE_USB
+
+unsigned CMiniOrgan::GetChunk (s16 *pBuffer, unsigned nChunkSize)
 {
+	unsigned nChannels = GetHWTXChannels ();
 	unsigned nResult = nChunkSize;
 
 	// reset sample counter if key has changed
@@ -203,8 +268,10 @@ unsigned CMiniOrgan::GetChunk (u32 *pBuffer, unsigned nChunkSize)
 		nSampleDelay = (SAMPLE_RATE/2 + m_nFrequency/2) / m_nFrequency;
 	}
 
-	for (; nChunkSize > 0; nChunkSize -= 2)		// fill the whole buffer
+	for (; nChunkSize > 0; nChunkSize -= nChannels)		// fill the whole buffer
 	{
+		s16 nSample = (s16) m_nNullLevel;
+
 		if (m_nFrequency != 0)			// key pressed?
 		{
 			// change output level if required to generate a square wave
@@ -222,13 +289,84 @@ unsigned CMiniOrgan::GetChunk (u32 *pBuffer, unsigned nChunkSize)
 				}
 			}
 
-			*pBuffer++ = (u32) m_nCurrentLevel;		// 2 stereo channels
-			*pBuffer++ = (u32) m_nCurrentLevel;
+			nSample = (s16) m_nCurrentLevel;
 		}
-		else
+
+		for (unsigned i = 0; i < nChannels; i++)
 		{
-			*pBuffer++ = (u32) m_nNullLevel;
-			*pBuffer++ = (u32) m_nNullLevel;
+			*pBuffer++ = nSample;
+		}
+	}
+
+	return nResult;
+}
+
+#endif
+
+unsigned CMiniOrgan::GetChunk (u32 *pBuffer, unsigned nChunkSize)
+{
+	unsigned nChannels = GetHWTXChannels ();
+	unsigned nResult = nChunkSize;
+
+	// reset sample counter if key has changed
+	if (m_nFrequency != m_nPrevFrequency)
+	{
+		m_nSampleCount = 0;
+
+		m_nPrevFrequency = m_nFrequency;
+	}
+
+	// output level has to be changed on every nSampleDelay'th sample (if key is pressed)
+	unsigned nSampleDelay = 0;
+	if (m_nFrequency != 0)
+	{
+		nSampleDelay = (SAMPLE_RATE/2 + m_nFrequency/2) / m_nFrequency;
+	}
+
+#ifdef USE_HDMI
+	unsigned nFrame = 0;
+#endif
+	for (; nChunkSize > 0; nChunkSize -= nChannels)		// fill the whole buffer
+	{
+		u32 nSample = (u32) m_nNullLevel;
+
+		if (m_nFrequency != 0)			// key pressed?
+		{
+			// change output level if required to generate a square wave
+			if (++m_nSampleCount >= nSampleDelay)
+			{
+				m_nSampleCount = 0;
+
+				if (m_nCurrentLevel < m_nHighLevel)
+				{
+					m_nCurrentLevel = m_nHighLevel;
+				}
+				else
+				{
+					m_nCurrentLevel = m_nLowLevel;
+				}
+			}
+
+			nSample = (u32) m_nCurrentLevel;
+		}
+
+#ifdef USE_HDMI
+		nSample = ConvertIEC958Sample (nSample, nFrame);
+
+		if (++nFrame == IEC958_FRAMES_PER_BLOCK)
+		{
+			nFrame = 0;
+		}
+#endif
+
+		for (unsigned i = 0; i < nChannels; i++)
+		{
+#ifdef USE_USB
+			*pBuffer = nSample;
+			pBuffer = (u32 *) ((u8 *) pBuffer + 3);
+#else
+			*pBuffer++ = nSample;
+#endif
 		}
 	}
 
@@ -278,6 +416,14 @@ void CMiniOrgan::MIDIPacketHandler (unsigned nCable, u8 *pPacket, unsigned nLeng
 			s_pThis->m_nFrequency = 0;
 		}
 	}
+	else if (ucType == MIDI_CC)
+	{
+		if (pPacket[1] == MIDI_CC_VOLUME)
+		{
+			s_pThis->m_uchVolume = pPacket[2];
+			s_pThis->m_bSetVolume = TRUE;
+		}
+	}
 }
 
 void CMiniOrgan::KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned char RawKeys[6])
@@ -322,4 +468,22 @@ void CMiniOrgan::KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned 
 	}
 
 	s_pThis->m_nFrequency = 0;
+}
+
+void CMiniOrgan::USBDeviceRemovedHandler (CDevice *pDevice, void *pContext)
+{
+	assert (s_pThis != 0);
+
+	if (s_pThis->m_pMIDIDevice == (CUSBMIDIDevice *) pDevice)
+	{
+		CLogger::Get ()->Write (FromMiniOrgan, LogDebug, "USB MIDI keyboard removed");
+
+		s_pThis->m_pMIDIDevice = 0;
+	}
+	else if (s_pThis->m_pKeyboard == (CUSBKeyboardDevice *) pDevice)
+	{
+		CLogger::Get ()->Write (FromMiniOrgan, LogDebug, "USB PC keyboard removed");
+
+		s_pThis->m_pKeyboard = 0;
+	}
 }

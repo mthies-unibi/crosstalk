@@ -22,8 +22,9 @@
 
 #include <circle/string.h>
 #include <circle/types.h>
-#include <stdint.h>
 
+/* typedef signed long time_t; */
+#include <stdint.h>
 typedef int_least64_t time_t;
 
 class CTime			/// Holds, makes and breaks the time

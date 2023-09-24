@@ -1,0 +1,5 @@
+  CC    ff.o
+  CPP   diskio.o
+  CPP   ffsystem.o
+  CC    ffunicode.o
+  AR    libfatfs.a

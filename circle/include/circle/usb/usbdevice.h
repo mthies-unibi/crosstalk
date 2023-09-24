@@ -2,7 +2,7 @@
 // usbdevice.h
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2014-2019  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2014-2022  R. Stange <rsta2@o2online.de>
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -23,6 +23,7 @@
 #include <circle/usb/usb.h>
 #include <circle/usb/usbconfigparser.h>
 #include <circle/usb/usbfunction.h>
+#include <circle/numberpool.h>
 #include <circle/logger.h>
 #include <circle/string.h>
 #include <circle/types.h>
@@ -76,6 +77,9 @@ public:
 	const TUSBDescriptor *GetDescriptor (u8 ucType);	// returns 0 if not found
 	void ConfigurationError (const char *pSource) const;
 
+	// nIndex is 0..USBDEV_MAX_FUNCTIONS-1, returns 0 for an empty slot
+	CUSBFunction *GetFunction (unsigned nIndex);
+
 	void LogWrite (TLogSeverity Severity, const char *pMessage, ...);
 
 #if RASPPI >= 4
@@ -127,7 +131,7 @@ private:
 #endif
 
 #if RASPPI <= 3
-	static u64 s_nDeviceAddressMap;
+	static CNumberPool s_DeviceAddressPool;
 #endif
 };
 

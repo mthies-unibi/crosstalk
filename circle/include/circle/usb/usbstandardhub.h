@@ -2,7 +2,7 @@
 // usbstandardhub.h
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2014-2019  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2014-2021  R. Stange <rsta2@o2online.de>
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -26,6 +26,7 @@
 #include <circle/usb/usbendpoint.h>
 #include <circle/usb/usbdevice.h>
 #include <circle/usb/usbhostcontroller.h>
+#include <circle/numberpool.h>
 #include <circle/types.h>
 
 class CUSBStandardHub : public CUSBFunction
@@ -38,7 +39,7 @@ public:
 	boolean Configure (void);
 
 	boolean ReScanDevices (void);
-	boolean RemoveDevice (unsigned nPortIndex);	// nPortIndex is 0-based
+	boolean RemoveDeviceAt (unsigned nPortIndex);	// nPortIndex is 0-based
 
 	boolean DisablePort (unsigned nPortIndex);	// nPortIndex is 0-based
 
@@ -49,10 +50,17 @@ public:
 private:
 	boolean EnumeratePorts (void);
 
+	boolean StartStatusChangeRequest (void);
+	void CompletionRoutine (CUSBRequest *pURB);
+	static void CompletionStub (CUSBRequest *pURB, void *pParam, void *pContext);
+	void HandlePortStatusChange (void);
+	friend class CUSBHostController;
+
 private:
 	TUSBHubDescriptor *m_pHubDesc;
 
 	CUSBEndpoint *m_pInterruptEndpoint;
+	u8 *m_pStatusChangeBuffer;
 
 	unsigned m_nPorts;
 	boolean m_bPowerIsOn;
@@ -64,7 +72,8 @@ private:
 	TUSBHubInfo *m_pHubInfo;
 #endif
 
-	static unsigned s_nDeviceNumber;
+	unsigned m_nDeviceNumber;
+	static CNumberPool s_DeviceNumberPool;
 };
 
 #endif

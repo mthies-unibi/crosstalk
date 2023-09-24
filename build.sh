@@ -17,7 +17,7 @@ function clean {
 
   cd circle/addon/SDCard/
   echo "Cleaning circle addon SDcard"
-  make clean
+  gmake clean
   rm build*.log
 
   popd > /dev/null 2>&1
@@ -25,14 +25,14 @@ function clean {
 
   cd circle/addon/fatfs/
   echo "Cleaning circle addon fatfs"
-  make clean
+  gmake clean
   rm build*.log
 
   popd  > /dev/null 2>&1
   pushd . > /dev/null 2>&1
 
   cd smalltalk/raspberry/
-  make clean
+  gmake clean
   rm build*.log
   rm kernel*.img
   rm kernel*.map
@@ -57,24 +57,24 @@ function build {
 
   cd circle/addon/SDCard/
   echo "Building circle addon SDcard"
-  make clean >> build_$1.log 2>&1
-  make > build_$1.log 2>&1
+  gmake clean >> build_$1.log 2>&1
+  gmake > build_$1.log 2>&1
 
   popd > /dev/null 2>&1
   pushd . > /dev/null 2>&1
 
   cd circle/addon/fatfs/
   echo "Building circle addon fatfs"
-  make clean >> build_$1.log 2>&1
-  make > build_$1.log 2>&1
+  gmake clean >> build_$1.log 2>&1
+  gmake > build_$1.log 2>&1
 
   popd  > /dev/null 2>&1
   pushd . > /dev/null 2>&1
 
   cd smalltalk/raspberry/
   echo "Building Smalltalk"
-  make clean >> build_$1.log 2>&1
-  make > build_$1.log 2>&1
+  gmake clean >> build_$1.log 2>&1
+  gmake > build_$1.log 2>&1
  
   popd > /dev/null 2>&1
 }
@@ -84,6 +84,14 @@ function build {
 if [ "$1" = "clean" ]; then
    clean 1
    exit 0
+fi
+
+if [ "$1" = "4" ]; then
+  echo "Building Smalltalk-80 bare metal for Raspberry Pi 4 only ..."
+  build 4
+  cp smalltalk/raspberry/kernel7l.img sdboot/
+  echo "Finished"
+  exit 0
 fi
 
 # Raspberry Pi 1/Zero

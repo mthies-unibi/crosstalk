@@ -2,7 +2,7 @@
 // usbendpoint.cpp
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2014-2019  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2014-2022  R. Stange <rsta2@o2online.de>
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -19,6 +19,7 @@
 //
 #include <circle/usb/usbendpoint.h>
 #include <circle/sysconfig.h>
+#include <circle/logger.h>
 #include <assert.h>
 
 CUSBEndpoint::CUSBEndpoint (CUSBDevice *pDevice)
@@ -55,6 +56,10 @@ CUSBEndpoint::CUSBEndpoint (CUSBDevice *pDevice, const TUSBEndpointDescriptor *p
 
 	switch (pDesc->bmAttributes & 0x03)
 	{
+	case 1:
+		m_Type = EndpointTypeIsochronous;
+		break;
+
 	case 2:
 		m_Type = EndpointTypeBulk;
 		break;
@@ -71,9 +76,10 @@ CUSBEndpoint::CUSBEndpoint (CUSBDevice *pDevice, const TUSBEndpointDescriptor *p
 	m_ucNumber       = pDesc->bEndpointAddress & 0x0F;
 	m_bDirectionIn   = pDesc->bEndpointAddress & 0x80 ? TRUE : FALSE;
 	m_nMaxPacketSize = pDesc->wMaxPacketSize & 0x7FF;
-	
+
 #if RASPPI <= 3
-	if (m_Type == EndpointTypeInterrupt)
+	if (   m_Type == EndpointTypeInterrupt
+	    || m_Type == EndpointTypeIsochronous)
 	{
 		u8 ucInterval = pDesc->bInterval;
 		if (ucInterval < 1)
@@ -112,6 +118,29 @@ CUSBEndpoint::CUSBEndpoint (CUSBDevice *pDevice, const TUSBEndpointDescriptor *p
 #endif
 	}
 #endif
+
+	// workaround for low-speed devices with bulk endpoints,
+	// which is normally forbidden by the USB spec.
+	if (   m_pDevice->GetSpeed () == USBSpeedLow
+	    && m_Type == EndpointTypeBulk)
+	{
+		CLogger::Get ()->Write ("uep", LogWarning, "Device is not fully USB compliant");
+
+		m_Type = EndpointTypeInterrupt;
+
+		if (m_nMaxPacketSize > 8)
+		{
+			m_nMaxPacketSize = 8;
+		}
+
+#if RASPPI <= 3
+#ifdef USE_USB_SOF_INTR
+		m_nInterval = 1;
+#else
+		m_nInterval = 20;
+#endif
+#endif
+	}
 
 #if RASPPI >= 4
 	m_pXHCIEndpoint = new CXHCIEndpoint ((CXHCIUSBDevice *) m_pDevice, pDesc,
@@ -171,7 +200,8 @@ u32 CUSBEndpoint::GetMaxPacketSize (void) const
 
 unsigned CUSBEndpoint::GetInterval (void) const
 {
-	assert (m_Type == EndpointTypeInterrupt);
+	assert (   m_Type == EndpointTypeInterrupt
+		|| m_Type == EndpointTypeIsochronous);
 
 	return m_nInterval;
 }
@@ -190,10 +220,12 @@ TUSBPID CUSBEndpoint::GetNextPID (boolean bStatusStage)
 
 void CUSBEndpoint::SkipPID (unsigned nPackets, boolean bStatusStage)
 {
-	assert (   m_Type == EndpointTypeControl
-		|| m_Type == EndpointTypeBulk
-		|| m_Type == EndpointTypeInterrupt);
-	
+	// TODO: for the supported Isochronous endpoints PID is always DATA0 (as initially set)
+	if (m_Type == EndpointTypeIsochronous)
+	{
+		return;
+	}
+
 	if (!bStatusStage)
 	{
 		switch (m_NextPID)
@@ -234,9 +266,10 @@ void CUSBEndpoint::SkipPID (unsigned nPackets, boolean bStatusStage)
 void CUSBEndpoint::ResetPID (void)
 {
 #if RASPPI <= 3
-	assert (m_Type == EndpointTypeBulk);
+	assert (   m_Type == EndpointTypeControl
+		|| m_Type == EndpointTypeBulk);
 
-	m_NextPID = USBPIDData0;
+	m_NextPID = m_Type == EndpointTypeControl ? USBPIDSetup : USBPIDData0;
 #endif
 }
 

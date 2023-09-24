@@ -2,7 +2,7 @@
 // kernel.cpp
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2014-2017  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2014-2022  R. Stange <rsta2@o2online.de>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -19,8 +19,11 @@
 //
 #include "kernel.h"
 #include "config.h"
-#include <circle/pwmsoundbasedevice.h>
-#include <circle/i2ssoundbasedevice.h>
+#include <circle/sound/pwmsoundbasedevice.h>
+#include <circle/sound/i2ssoundbasedevice.h>
+#include <circle/sound/hdmisoundbasedevice.h>
+#include <circle/sound/usbsoundbasedevice.h>
+#include <circle/machineinfo.h>
 #include <circle/util.h>
 #include <assert.h>
 
@@ -54,8 +57,10 @@ CKernel::CKernel (void)
 :	m_Screen (m_Options.GetWidth (), m_Options.GetHeight ()),
 	m_Timer (&m_Interrupt),
 	m_Logger (m_Options.GetLogLevel (), &m_Timer),
+	m_I2CMaster (CMachineInfo::Get ()->GetDevice (DeviceI2CMaster), TRUE),
+	m_USBHCI (&m_Interrupt, &m_Timer, FALSE),
 #ifdef USE_VCHIQ_SOUND
-	m_VCHIQ (&m_Memory, &m_Interrupt),
+	m_VCHIQ (CMemorySystem::Get (), &m_Interrupt),
 #endif
 	m_pSound (0),
 	m_VFO (&m_LFO)		// LFO modulates the VFO
@@ -102,6 +107,16 @@ boolean CKernel::Initialize (void)
 		bOK = m_Timer.Initialize ();
 	}
 
+	if (bOK)
+	{
+		bOK = m_I2CMaster.Initialize ();
+	}
+
+	if (bOK)
+	{
+		bOK = m_USBHCI.Initialize ();
+	}
+
 #ifdef USE_VCHIQ_SOUND
 	if (bOK)
 	{
@@ -124,8 +139,19 @@ TShutdownMode CKernel::Run (void)
 	}
 	else if (strcmp (pSoundDevice, "sndi2s") == 0)
 	{
-		m_pSound = new CI2SSoundBaseDevice (&m_Interrupt, SAMPLE_RATE, CHUNK_SIZE);
+		m_pSound = new CI2SSoundBaseDevice (&m_Interrupt, SAMPLE_RATE, CHUNK_SIZE, FALSE,
+						    &m_I2CMaster, DAC_I2C_ADDRESS);
 	}
+	else if (strcmp (pSoundDevice, "sndhdmi") == 0)
+	{
+		m_pSound = new CHDMISoundBaseDevice (&m_Interrupt, SAMPLE_RATE, CHUNK_SIZE);
+	}
+#if RASPPI >= 4
+	else if (strcmp (pSoundDevice, "sndusb") == 0)
+	{
+		m_pSound = new CUSBSoundBaseDevice (SAMPLE_RATE);
+	}
+#endif
 	else
 	{
 #ifdef USE_VCHIQ_SOUND

@@ -2,6 +2,7 @@ CLASSES
 
 Base library
 
+* C2DGraphics: Software graphics library with VSync and hardware-accelerated double buffering.
 * CActLED: Switch the Act LED on and off, checks the Raspberry Pi model to use the right LED pin.
 * CBcm54213Device: Driver for BCM54213PE Gigabit Ethernet Transceiver of Raspberry Pi 4.
 * CBcmFrameBuffer: Frame buffer initialization, setting color palette for 8 bit depth.
@@ -9,40 +10,45 @@ Base library
 * CBcmPCIeHostBridge: Driver for PCIe Host Bridge of Raspberry Pi 4.
 * CBcmPropertyTags: Get several information from the GPU side or control something on this side.
 * CBcmRandomNumberGenerator: Driver for the built-in hardware random number generator.
+* CBcmWatchdog: Driver for the BCM2835 watchdog device.
 * CCharGenerator: Gives pixel information for console font
 * CClassAllocator: Support class for the class-specific allocation of objects
 * CCPUThrottle: Manages CPU clock rate depending on user requirements and SoC temperature.
 * CDevice: Base class for all devices
 * CDeviceNameService: Devices can be registered by name and retrieved later by this name
+* CDeviceTreeBlob: Simple Devicetree blob parser
+* CDMA4Channel: Platform DMA4 "large address" controller support (helper class).
 * CDMAChannel: Platform DMA controller support (I/O read/write, memory copy).
 * CExceptionHandler: Generates a stack-trace and a panic message if an abort exception occurs.
 * CGPIOClock: Using GPIO clocks, initialize, start and stop it.
 * CGPIOManager: Interrupt multiplexer for CGPIOPin (only required if GPIO interrupt is used).
 * CGPIOPin: Encapsulates a GPIO pin, can be read, write or inverted. Supports interrupts. Simple initialization.
 * CGPIOPinFIQ: GPIO fast interrupt pin (only one allowed in the system).
+* CGenericLock: Locks a resource with or without scheduler.
 * CHeapAllocator: Allocates blocks from a flat memory region.
 * CI2CMaster: Driver for I2C master devices.
 * CI2CSlave: Driver for I2C slave device.
-* CI2SSoundBaseDevice: Low level access to the I2S sound device.
 * CInterruptSystem: Connecting to interrupts, an interrupt handler will be called on interrupt.
 * CKernelOptions: Providing kernel options from file cmdline.txt (see doc/cmdline.txt).
+* CLatencyTester: Measures the IRQ latency of the running code.
 * CLogger: Writing logging messages to a target device
 * CMACAddress: Encapsulates an Ethernet MAC address.
 * CMachineInfo: Helper class to get different information about the running computer.
 * CMemorySystem: Enabling MMU if requested, switching page tables (not used here).
+* CMPHIDevice: A driver, which uses the MPHI device to generate an IRQ.
 * CMultiCoreSupport: Implements multi-core support on the Raspberry Pi 2.
 * CNetDevice: Base class (interface) of net devices.
 * CNullDevice: Character device which ignores sent data and returns 0 bytes on read.
+* CNumberPool: Allocation pool for (device) numbers.
 * CPageAllocator: Allocates aligned pages from a flat memory region.
 * CPageTable: Encapsulates a page table to be used by MMU (AArch32).
 * CPtrArray: Container class. Dynamic array of pointers.
 * CPtrList: Container class. List of pointers.
+* CPtrListFIQ: Container class. List of pointers, usable from FIQ_LEVEL.
 * CPWMOutput: Pulse Width Modulator output (2 channels).
-* CPWMSoundDevice: Using the PWM device to playback sound samples in different formats.
-* CPWMSoundBaseDevice: Low level access to the PWM device to generate sounds on the 3.5mm headphone jack.
 * CScreenDevice: Writing characters to screen, some escape sequences (some are not yet implemented)
 * CSerialDevice: Driver for PL011 UART, interrupt or polling mode
-* CSoundBaseDevice: Base class of sound devices, converts several sound formats.
+* CSMIMaster: Driver for the Second Memory Interface.
 * CSpinLock: Encapsulates a spin lock for synchronizing the concurrent access to a resource from multiple cores.
 * CSPIMaster: Driver for (non-AUX) SPI master device. Synchronous polling operation.
 * CSPIMasterAUX: Driver for the auxiliary SPI master (SPI1).
@@ -54,11 +60,14 @@ Base library
 * CTranslationTable: Encapsulates a translation table to be used by MMU (AArch64).
 * CUserTimer: Fine grained user programmable interrupt timer (based on ARM_IRQ_TIMER1)
 * CVirtualGPIOPin: Encapsulates a "virtual" GPIO pin controlled by the VideoCore (Output only).
+* CWriteBufferDevice: Filter for buffered write to (e.g. screen) device.
 
 USB library
 
+* CDWHCICompletionQueue: Queues USB requests ready for completion (with USE_USB_FIQ enabled).
 * CDWHCIDevice: USB host controller interface (HCI) driver for Raspberry Pi 1-3.
 * CDWHCIFrameScheduler: Base class for a simple micro frame scheduler
+* CDWHCIFrameSchedulerIsochronous: Schedules the transmission of isochronous split frames to non-high-speed devices
 * CDWHCIFrameSchedulerNonPeriodic: Schedules the transmission of non-interrupt split frames to non-high-speed devices
 * CDWHCIFrameSchedulerNoSplit: Schedules the transmission of frames to direct attached non-high-speed devices
 * CDWHCIFrameSchedulerPeriodic: Schedules the transmission of interrupt split frames to non-high-speed devices
@@ -68,6 +77,9 @@ USB library
 * CDWHCITransferStageData: Holds all the data needed for a transfer stage on one HCI channel.
 * CLAN7800Device: Driver for the on-board USB Gigabit Ethernet device of the Raspberry Pi 3 B+.
 * CSMSC951xDevice: Driver for the on-board USB Ethernet device.
+* CUSBAudioControlDevice: Driver for USB audio control devices.
+* CUSBAudioStreamingDevice: Low-level driver for USB audio streaming devices.
+* CUSBAudioFunctionTopology: Topology parser for USB audio class devices.
 * CUSBBluetoothDevice: Bluetooth HCI transport driver for USB Bluetooth BR/EDR dongles.
 * CUSBBulkOnlyMassStorageDevice: Driver for USB mass storage devices (bulk only)
 * CUSBCDCEthernetDevice: Driver for the USB CDC Ethernet device implemented in QEMU.
@@ -88,12 +100,19 @@ USB library
 * CUSBHIDDevice: General USB HID device (e.g. keyboard, mouse, gamepad)
 * CUSBHostController: Base class of CDWHCIDevice, some basic functions for host controllers.
 * CUSBKeyboardDevice: Driver for USB keyboards
-* CUSBMIDIDevice: Driver for USB Audio Class MIDI devices (input only)
+* CUSBMIDIDevice: Driver for USB Audio Class MIDI 1.0 devices
 * CUSBMouseDevice: Driver for USB mice
 * CUSBPrinterDevice: Simple communications driver for USB printers (back-channel is not used).
 * CUSBRequest: A request to an USB device (URB).
+* CUSBSerialCDCDevice: Driver for USB CDC serial devices (e.g. micro:bit)
+* CUSBSerialCH341Device: Driver for CH341 based USB serial devices
+* CUSBSerialCP210xDevice: Driver for CP210x based USB serial devices
+* CUSBSerialDevice: Base class and interface for USB serial device drivers
+* CUSBSerialFT231XDevice: Driver for FTDI based USB serial devices
+* CUSBSerialPL2303Device: Driver for PL2303 based USB serial devices
 * CUSBStandardHub: USB hub driver for LAN9512/9514 and external hubs (max. 8 ports)
 * CUSBString: Encapsulates a string descriptor, available on an USB device.
+* CUSBTouchScreenDevice: Driver for USB HID-class touchscreens.
 * CXHCICommandManager: Synchronous xHC command execution for the xHCI driver.
 * CXHCIDevice: USB host controller interface (xHCI) driver for Raspberry Pi 4.
 * CXHCIEndpoint: Encapsulates a single endpoint of an USB device for the xHCI driver.
@@ -115,7 +134,8 @@ Input library
 * CLineDiscipline: Implements line editor function
 * CMouseBehaviour: Generic mouse function, handles the mouse cursor
 * CMouseDevice: Generic mouse interface device
-* CTouchScreenDevice: Driver for the official Raspberry Pi touch screen
+* CRPiTouchScreen: Driver for the official Raspberry Pi touch screen
+* CTouchScreenDevice: Generic touch screen interface device
 
 FS library
 
@@ -132,8 +152,10 @@ FAT FS library
 
 Scheduler library
 
+* CMutex: Provides a method to provide mutual exclusion (critical sections) across tasks.
 * CTask: Overload this class, define the Run() method to implement your own task and call new on it to start it.
 * CScheduler: Cooperative non-preemtive scheduler which controls which task runs at a time.
+* CSemaphore: Implements a semaphore synchronization class.
 * CSynchronizationEvent: Provides a method to synchronize the execution of a task with an event.
 
 Net library
@@ -171,3 +193,17 @@ Net library
 * CTFTPDaemon: TFTP server task.
 * CTransportLayer: Encapsulates the TCP/UDP transport layer.
 * CUDPConnection: Encapsulates a (virtual) UDP connection. Derived from CNetConnection.
+
+Sound library
+
+* CDMASoundBuffers: Concatenated DMA buffers to be used by sound device drivers.
+* CHDMISoundBaseDevice: Low level access to the HDMI sound device (without VCHIQ).
+* CI2SSoundBaseDevice: Low level access to the I2S sound device.
+* CPCM512xSoundController: Sound controller for PCM512x.
+* CPWMSoundDevice: Using the PWM device to playback sound samples in different formats.
+* CPWMSoundBaseDevice: Low level access to the PWM device to generate sounds on the 3.5mm headphone jack.
+* CSoundBaseDevice: Base class of sound devices, converts several sound formats.
+* CSoundController: Optional controller of a sound device.
+* CUSBSoundBaseDevice: High-level driver for USB audio streaming devices.
+* CUSBSoundController: Sound controller for USB sound devices.
+* CWM8960SoundController: Sound controller for WM8960.

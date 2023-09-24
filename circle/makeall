@@ -9,6 +9,10 @@ then
 	shift
 fi
 
+cd tools
+$make $1 $2 || exit
+cd ..
+
 cd lib
 $make $1 $2 || exit
 
@@ -34,6 +38,10 @@ $make $1 $2 || exit
 cd ..
 
 cd net
+$make $1 $2 || exit
+cd ..
+
+cd sound
 $make $1 $2 || exit
 cd ..
 

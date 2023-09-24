@@ -2,7 +2,7 @@
 // cputhrottle.h
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2016-2017  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2016-2022  R. Stange <rsta2@o2online.de>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -20,6 +20,8 @@
 #ifndef _circle_cputhrottle_h
 #define _circle_cputhrottle_h
 
+#include <circle/gpiopin.h>
+#include <circle/macros.h>
 #include <circle/types.h>
 
 enum TCPUSpeed
@@ -29,6 +31,18 @@ enum TCPUSpeed
 	CPUSpeedUnknown
 };
 
+enum TSystemThrottledState
+{
+	SystemStateNothingOccurred		= 0,
+
+	SystemStateUnderVoltageOccurred		= BIT (16),
+	SystemStateFrequencyCappingOccurred	= BIT (17),
+	SystemStateThrottlingOccurred		= BIT (18),
+	SystemStateSoftTempLimitOccurred	= BIT (19)
+};
+
+typedef void TSystemThrottledHandler (TSystemThrottledState CurrentState, void *pParam);
+
 /// \warning You have to repeatedly call SetOnTemperature() or Update() if you use this class!\n
 ///	     See the description of SetOnTemperature() for details!\n
 ///	     IF YOU ARE NOT SURE ABOUT HOW TO MANAGE THIS, DO NOT USE THIS CLASS!
@@ -36,6 +50,9 @@ enum TCPUSpeed
 /// \warning CCPUThrottle cannot be used together with code doing I2C or SPI transfers.\n
 ///	     Because clock rate changes to the CPU clock may also effect the CORE clock,\n
 ///	     this could result in a changing transfer speed.
+
+/// \note If the cmdline.txt option "gpiofanpin=" is used, this class controls a GPIO fan\n
+///	  not the CPU clock rate.
 
 class CCPUThrottle	/// Manages CPU clock rate depending on app/user requirements and SoC temperature
 {
@@ -77,9 +94,19 @@ public:
 	boolean SetOnTemperature (void);
 
 	/// \brief Same function as SetOnTemperature(), but can be called\n
-	/// as often as you want without checking the calling interval.
+	/// as often as you want without checking the calling interval.\n
+	/// Additionally checks for system throttled conditions, if a system\n
+	/// throttled handler is registered.
 	/// \return Operation successful?
 	boolean Update (void);
+
+	/// \brief Register a callback function, which is called from Update(),\n
+	/// when a system throttled condition occurs, which is given in StateMask.
+	/// \param StateMask TSystemThrottledState values to be watched (or'ed together)
+	/// \param pHandler Callback function to be called
+	/// \param pParam User parameter to be handed over to the callback function
+	void RegisterSystemThrottledHandler (unsigned StateMask,
+					     TSystemThrottledHandler *pHandler, void *pParam = 0);
 
 	/// \brief Dump some information on the current CPU status
 	/// \param bAll Dump all information (only current clock rate and temperature otherwise)
@@ -90,6 +117,8 @@ public:
 
 private:
 	boolean SetSpeedInternal (TCPUSpeed Speed, boolean bWait);
+
+	boolean CheckThrottledState (void);
 
 	void SetToSetDelay (void);
 
@@ -107,6 +136,14 @@ private:
 	TCPUSpeed m_SpeedSet;
 	unsigned  m_nTicksLastSet;
 	unsigned  m_nTicksLastUpdate;
+
+	TSystemThrottledState m_ThrottledStateMask;
+	TSystemThrottledState m_LastThrottledState;
+	TSystemThrottledHandler *m_pThrottledHandler;
+	void *m_pThrottledParam;
+
+	boolean m_bFanConnected;
+	CGPIOPin m_FanPin;
 
 	static CCPUThrottle *s_pThis;
 };

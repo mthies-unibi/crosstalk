@@ -2,7 +2,7 @@
 // usbdevice.cpp
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2014-2019  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2014-2023  R. Stange <rsta2@o2online.de>
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -30,12 +30,12 @@
 #include <circle/debug.h>
 #include <assert.h>
 
-#define MAX_CONFIG_DESC_SIZE		512		// best guess
+#define MAX_CONFIG_DESC_SIZE		1024		// best guess
 
 static const char FromDevice[] = "usbdev";
 
 #if RASPPI <= 3
-u64 CUSBDevice::s_nDeviceAddressMap = 0;
+CNumberPool CUSBDevice::s_DeviceAddressPool (USB_FIRST_DEDICATED_ADDRESS, USB_MAX_ADDRESS);
 #endif
 
 CUSBDevice::CUSBDevice (CUSBHostController *pHost, TUSBSpeed Speed, CUSBHCIRootPort *pRootPort)
@@ -124,17 +124,29 @@ CUSBDevice::CUSBDevice (CUSBHostController *pHost, TUSBSpeed Speed,
 
 CUSBDevice::~CUSBDevice (void)
 {
+	assert (m_pHost != 0);
+	m_pHost->CancelDeviceTransactions (this);
+
 	for (unsigned nFunction = 0; nFunction < USBDEV_MAX_FUNCTIONS; nFunction++)
 	{
 		delete (m_pFunction[nFunction]);
 		m_pFunction[nFunction] = 0;
 	}
 
+	if (m_pDeviceDesc != 0)
+	{
+		CString *pNames = GetNames ();
+		assert (pNames != 0);
+
+		LogWrite (LogNotice, "Device %s removed", (const char *) *pNames);
+
+		delete pNames;
+	}
+
 #if RASPPI <= 3
 	if (m_ucAddress != USB_DEFAULT_ADDRESS)
 	{
-		assert (s_nDeviceAddressMap & ((u64) 1 << m_ucAddress));
-		s_nDeviceAddressMap &= ~((u64) 1 << m_ucAddress);
+		s_DeviceAddressPool.FreeNumber (m_ucAddress);
 	}
 #endif
 
@@ -155,10 +167,11 @@ CUSBDevice::~CUSBDevice (void)
 
 boolean CUSBDevice::Initialize (void)
 {
-#if RASPPI <= 3 && defined (REALTIME)
+#if RASPPI <= 3 && defined (REALTIME) && !defined (USE_USB_SOF_INTR)
 	if (m_Speed != USBSpeedHigh)
 	{
-		LogWrite (LogWarning, "Device speed is not allowed with REALTIME");
+		LogWrite (LogWarning, "Device speed is not allowed with REALTIME"
+				      " without USE_USB_SOF_INTR");
 
 		return FALSE;
 	}
@@ -224,33 +237,24 @@ boolean CUSBDevice::Initialize (void)
 #endif
 
 #if RASPPI <= 3
-	// find and allocate first free device address
-	u8 ucAddress;
-	for (ucAddress = USB_FIRST_DEDICATED_ADDRESS; ucAddress <= USB_MAX_ADDRESS; ucAddress++)
-	{
-		if (!(s_nDeviceAddressMap & ((u64) 1 << ucAddress)))
-		{
-			break;
-		}
-	}
-
-	if (ucAddress > USB_MAX_ADDRESS)
+	unsigned nAddress = s_DeviceAddressPool.AllocateNumber (FALSE);
+	if (nAddress == CNumberPool::Invalid)
 	{
 		LogWrite (LogError, "Too many devices");
 
 		return FALSE;
 	}
 
-	s_nDeviceAddressMap |= (u64) 1 << ucAddress;
-
-	if (!m_pHost->SetAddress (m_pEndpoint0, ucAddress))
+	if (!m_pHost->SetAddress (m_pEndpoint0, (u8) nAddress))
 	{
-		LogWrite (LogError, "Cannot set address %u", (unsigned) ucAddress);
+		LogWrite (LogError, "Cannot set address %u", nAddress);
+
+		s_DeviceAddressPool.FreeNumber (nAddress);
 
 		return FALSE;
 	}
 	
-	SetAddress (ucAddress);
+	SetAddress ((u8) nAddress);
 #endif
 
 	assert (m_pConfigDesc == 0);
@@ -326,22 +330,49 @@ boolean CUSBDevice::Initialize (void)
 		return FALSE;
 	}
 
+	// must match enum TUSBSpeed in <circle/usb/usb.h>
+	static const char *Speeds[] = {"LS", "FS", "HS", "SS"};
+	assert (m_Speed < sizeof Speeds / sizeof Speeds[0]);
+
 	CString *pNames = GetNames ();
 	assert (pNames != 0);
-	LogWrite (LogNotice, "Device %s found", (const char *) *pNames);
+	LogWrite (LogNotice, "Device %s found (%s)", (const char *) *pNames, Speeds[m_Speed]);
 	delete pNames;
 
-#if 0
-	if (   m_pDeviceDesc->iProduct != 0
-	    && m_pDeviceDesc->iProduct != 0xFF)
+	CString Product;
+	CUSBString USBString (this);
+
+	if (   m_pDeviceDesc->iManufacturer != 0
+	    && m_pDeviceDesc->iManufacturer != 0xFF
+	    && USBString.GetFromDescriptor (m_pDeviceDesc->iManufacturer, USBString.GetLanguageID ()))
 	{
-		CUSBString Product (this);
-		if (Product.GetFromDescriptor (m_pDeviceDesc->iProduct, Product.GetLanguageID ()))
-		{
-			LogWrite (LogNotice, "Product: %s", Product.Get ());
-		}
+		Product = USBString.Get ();
 	}
-#endif
+
+	if (   m_pDeviceDesc->iProduct != 0
+	    && m_pDeviceDesc->iProduct != 0xFF
+	    && USBString.GetFromDescriptor (m_pDeviceDesc->iProduct, USBString.GetLanguageID ()))
+	{
+		if (Product.GetLength () > 0)
+		{
+			Product.Append (" ");
+		}
+
+		Product.Append (USBString.Get ());
+	}
+
+	if (Product.GetLength () > 0)
+	{
+		LogWrite (LogNotice, "Product: %s", (const char *) Product);
+	}
+
+	if (!m_pHost->SetConfiguration (m_pEndpoint0, m_pConfigDesc->bConfigurationValue))
+	{
+		LogWrite (LogError, "Cannot set configuration (%u)",
+			  (unsigned) m_pConfigDesc->bConfigurationValue);
+
+		return FALSE;
+	}
 
 	unsigned nFunction = 0;
 	u8 ucInterfaceNumber = 0;
@@ -408,7 +439,7 @@ boolean CUSBDevice::Initialize (void)
 
 		if (!m_pFunction[nFunction]->Initialize ())
 		{
-			LogWrite (LogError, "Cannot initialize function");
+			LogWrite (LogDebug, "Cannot initialize function");
 
 			delete m_pFunction[nFunction];
 			m_pFunction[nFunction] = 0;
@@ -430,6 +461,11 @@ boolean CUSBDevice::Initialize (void)
 	{
 		LogWrite (LogWarning, "Device has no supported function");
 
+		if (!m_pHost->SetConfiguration (m_pEndpoint0, 0))
+		{
+			LogWrite (LogWarning, "Cannot reset configuration");
+		}
+
 		return FALSE;
 	}
 
@@ -443,13 +479,6 @@ boolean CUSBDevice::Configure (void)
 
 	if (m_pConfigDesc == 0)		// not initialized
 	{
-		return FALSE;
-	}
-
-	if (!m_pHost->SetConfiguration (m_pEndpoint0, m_pConfigDesc->bConfigurationValue))
-	{
-		LogWrite (LogError, "Cannot set configuration (%u)", (unsigned) m_pConfigDesc->bConfigurationValue);
-
 		return FALSE;
 	}
 
@@ -502,7 +531,7 @@ boolean CUSBDevice::RemoveDevice (void)
 	}
 
 	assert (m_pHub != 0);
-	return m_pHub->RemoveDevice (m_nHubPortIndex);
+	return m_pHub->RemoveDeviceAt (m_nHubPortIndex);
 }
 
 CString *CUSBDevice::GetName (TDeviceNameSelector Selector) const
@@ -649,6 +678,16 @@ void CUSBDevice::ConfigurationError (const char *pSource) const
 {
 	assert (m_pConfigParser != 0);
 	m_pConfigParser->Error (pSource);
+}
+
+CUSBFunction *CUSBDevice::GetFunction (unsigned nIndex)
+{
+	if (nIndex >= USBDEV_MAX_FUNCTIONS)
+	{
+		return 0;
+	}
+
+	return m_pFunction[nIndex];
 }
 
 void CUSBDevice::LogWrite (TLogSeverity Severity, const char *pMessage, ...)

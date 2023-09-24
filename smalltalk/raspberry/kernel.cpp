@@ -233,7 +233,7 @@ void CKernel::KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned cha
 //        s_pThis->m_Logger.Write (FromKernel, LogNotice, Message);
 }
 
-void CKernel::MouseEventHandler (TMouseEvent Event, unsigned nButtons, unsigned nPosX, unsigned nPosY)
+void CKernel::MouseEventHandler (TMouseEvent Event, unsigned nButtons, unsigned nPosX, unsigned nPosY, int nWheelMove)
 {
 		m_nPosX = nPosX;
 		m_nPosY = nPosY;
@@ -258,10 +258,10 @@ void CKernel::MouseEventHandler (TMouseEvent Event, unsigned nButtons, unsigned 
         }
 }
 
-void CKernel::MouseEventStub (TMouseEvent Event, unsigned nButtons, unsigned nPosX, unsigned nPosY)
+void CKernel::MouseEventStub (TMouseEvent Event, unsigned nButtons, unsigned nPosX, unsigned nPosY, int nWheelMove)
 {
 	assert (s_pThis != 0);
-	s_pThis->MouseEventHandler (Event, nButtons, nPosX, nPosY);
+	s_pThis->MouseEventHandler (Event, nButtons, nPosX, nPosY, nWheelMove);
 }
 
 void CKernel::DrawLine (int nPosX1, int nPosY1, int nPosX2, int nPosY2, TScreenColor Color)

@@ -16,7 +16,7 @@
 //	Licensed under GPLv2
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2019-2020  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2019-2021  R. Stange <rsta2@o2online.de>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -1108,6 +1108,11 @@ void CBcm54213Device::set_rx_mode(void)
 // clear Hardware Filter Block and disable all filtering
 void CBcm54213Device::hfb_init(void)
 {
+	// this has no function, but to suppress warnings from clang compiler >>>
+	hfb_reg_readl (HFB_CTRL);
+	hfb_readl (0);
+	// <<<
+
 	hfb_reg_writel(0, HFB_CTRL);
 	hfb_reg_writel(0, HFB_FLT_ENABLE_V3PLUS);
 	hfb_reg_writel(0, HFB_FLT_ENABLE_V3PLUS + 4);
@@ -1617,7 +1622,13 @@ int CBcm54213Device::mii_probe(void)
 	m_old_duplex = -1;
 	m_old_pause = -1;
 
+	// probe PHY
+	m_phy_id = 0x01;
 	int ret = mdio_reset();
+	if (ret) {
+		m_phy_id = 0x00;
+		ret = mdio_reset();
+	}
 	if (ret)
 		return ret;
 
@@ -1724,8 +1735,6 @@ int CBcm54213Device::mii_config(bool init)
 // UniMAC MDIO
 //
 
-#define PHY_ID			0x01		// address of this PHY
-
 #define MDIO_CMD		0x00		// same register as UMAC_MDIO_CMD
 
 #define MII_BMSR		0x01
@@ -1760,10 +1769,10 @@ static inline void mdio_start(void)
 	mdio_writel(reg, MDIO_CMD);
 }
 
-static inline unsigned mdio_busy(void)
-{
-	return mdio_readl(MDIO_CMD) & MDIO_START_BUSY;
-}
+// static inline unsigned mdio_busy(void)
+// {
+// 	return mdio_readl(MDIO_CMD) & MDIO_START_BUSY;
+// }
 
 // Workaround for integrated BCM7xxx Gigabit PHYs which have a problem with
 // their internal MDIO management controller making them fail to successfully
@@ -1773,7 +1782,9 @@ static inline unsigned mdio_busy(void)
 // PHY device for this peripheral.
 int CBcm54213Device::mdio_reset(void)
 {
-	mdio_read(MII_BMSR);
+	int ret = mdio_read(MII_BMSR);
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }
@@ -1782,7 +1793,7 @@ int CBcm54213Device::mdio_read(int reg)
 {
 	// Prepare the read operation
 	u32 cmd =   MDIO_RD
-		  | (PHY_ID << MDIO_PMD_SHIFT)
+		  | (m_phy_id << MDIO_PMD_SHIFT)
 		  | (reg << MDIO_REG_SHIFT);
 	mdio_writel(cmd, MDIO_CMD);
 
@@ -1802,7 +1813,7 @@ void CBcm54213Device::mdio_write(int reg, u16 val)
 {
 	// Prepare the write operation
 	u32 cmd =   MDIO_WR
-		  | (PHY_ID << MDIO_PMD_SHIFT)
+		  | (m_phy_id << MDIO_PMD_SHIFT)
 		  | (reg << MDIO_REG_SHIFT)
 		  | (0xFFFF & val);
 	mdio_writel(cmd, MDIO_CMD);

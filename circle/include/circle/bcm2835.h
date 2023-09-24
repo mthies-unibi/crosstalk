@@ -2,7 +2,7 @@
 // bcm2835.h
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2014-2020  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2014-2022  R. Stange <rsta2@o2online.de>
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -192,8 +192,16 @@
 //
 #define ARM_CM_BASE		(ARM_IO_BASE + 0x101000)
 
+#define ARM_CM_CAM0CTL		(ARM_CM_BASE + 0x40)
+#define ARM_CM_CAM0DIV		(ARM_CM_BASE + 0x44)
+#define ARM_CM_CAM1CTL		(ARM_CM_BASE + 0x48)
+#define ARM_CM_CAM1DIV		(ARM_CM_BASE + 0x4C)
+
 #define ARM_CM_GP0CTL		(ARM_CM_BASE + 0x70)
 #define ARM_CM_GP0DIV		(ARM_CM_BASE + 0x74)
+
+#define ARM_CM_SMICTL		(ARM_CM_BASE + 0xB0)
+#define ARM_CM_SMIDIV		(ARM_CM_BASE + 0xB4)
 
 #define ARM_CM_PASSWD 		(0x5A << 24)
 
@@ -205,6 +213,17 @@
 #define ARM_USB_CORE_BASE	ARM_USB_BASE
 #define ARM_USB_HOST_BASE	(ARM_USB_BASE + 0x400)
 #define ARM_USB_POWER		(ARM_USB_BASE + 0xE00)
+
+//
+// Host Port (MPHI)
+//
+#define ARM_MPHI_BASE		(ARM_IO_BASE + 0x6000)
+#define ARM_MPHI_END		(ARM_IO_BASE + 0x6FFF)
+
+#define ARM_MPHI_OUTDDA		(ARM_MPHI_BASE + 0x28)
+#define ARM_MPHI_OUTDDB		(ARM_MPHI_BASE + 0x2C)
+#define ARM_MPHI_CTRL		(ARM_MPHI_BASE + 0x4C)
+#define ARM_MPHI_INTSTAT	(ARM_MPHI_BASE + 0x50)
 
 //
 // External Mass Media Controller (SD Card)
@@ -222,6 +241,7 @@
 #define ARM_PM_BASE		(ARM_IO_BASE + 0x100000)
 
 #define ARM_PM_RSTC		(ARM_PM_BASE + 0x1C)
+#define ARM_PM_RSTS		(ARM_PM_BASE + 0x20)
 #define ARM_PM_WDOG		(ARM_PM_BASE + 0x24)
 #define ARM_PM_PADS0		(ARM_PM_BASE + 0x2C)    // GPIO 0 - 27
 #define ARM_PM_PADS1		(ARM_PM_BASE + 0x30)    // GPIO 28 - 45
@@ -231,6 +251,7 @@
 #define ARM_PM_RSTC_CLEAR	0xFFFFFFCF
 #define ARM_PM_RSTC_REBOOT	0x00000020
 #define ARM_PM_RSTC_RESET	0x00000102
+#define ARM_PM_RSTS_PART_CLEAR	0xFFFFFAAA
 #define ARM_PM_WDOG_TIME	0x000FFFFF
 #define ARM_PADS_SLEW		(0x01 << 4)
 #define ARM_PADS_HYST		(0x01 << 3)
@@ -323,5 +344,29 @@
 //
 #define ARM_VCHIQ_BASE		(ARM_IO_BASE + 0xB840)
 #define ARM_VCHIQ_END		(ARM_VCHIQ_BASE + 0x0F)
+
+//
+// VC4/5 HDMI
+//
+#if RASPPI <= 3
+#define ARM_HDMI_BASE		(ARM_IO_BASE + 0x902000)
+#define ARM_HD_BASE		(ARM_IO_BASE + 0x808000)
+#else
+#define ARM_HDMI_BASE		(ARM_IO_BASE + 0xF00700)
+#define ARM_HD_BASE		(ARM_IO_BASE + 0xF20000)
+#define ARM_PHY_BASE		(ARM_IO_BASE + 0xF00F00)
+#define ARM_RAM_BASE		(ARM_IO_BASE + 0xF01B00)
+#endif
+
+//
+// CSI
+//
+#define ARM_CSI0_BASE		(ARM_IO_BASE + 0x800000)
+#define ARM_CSI0_END		(ARM_CSI0_BASE + 0x7FF)
+#define ARM_CSI0_CLKGATE	(ARM_IO_BASE + 0x802000)	// 4 bytes
+
+#define ARM_CSI1_BASE		(ARM_IO_BASE + 0x801000)
+#define ARM_CSI1_END		(ARM_CSI1_BASE + 0x7FF)
+#define ARM_CSI1_CLKGATE	(ARM_IO_BASE + 0x802004)	// 4 bytes
 
 #endif

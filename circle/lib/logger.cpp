@@ -2,7 +2,7 @@
 // logger.cpp
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2014-2020  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2014-2022  R. Stange <rsta2@o2online.de>
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -28,8 +28,6 @@
 #include <circle/version.h>
 #include <circle/debug.h>
 
-#define LOGGER_BUFSIZE	0x4000
-
 struct TLogEvent
 {
 	TLogSeverity	Severity;
@@ -42,9 +40,10 @@ struct TLogEvent
 
 CLogger *CLogger::s_pThis = 0;
 
-CLogger::CLogger (unsigned nLogLevel, CTimer *pTimer)
+CLogger::CLogger (unsigned nLogLevel, CTimer *pTimer, boolean bOverwriteOldest)
 :	m_nLogLevel (nLogLevel),
 	m_pTimer (pTimer),
+	m_bOverwriteOldest (bOverwriteOldest),
 	m_pTarget (0),
 	m_pBuffer (0),
 	m_nInPtr (0),
@@ -84,11 +83,11 @@ boolean CLogger::Initialize (CDevice *pTarget)
 {
 	m_pTarget = pTarget;
 
-	Write ("logger", LogNotice, CIRCLE_NAME " " CIRCLE_VERSION_STRING " started on %s"
+	Write ("logger", LogNotice, CIRCLE_NAME " %s started on %s"
 #if AARCH == 64
 	       " (AArch64)"
 #endif
-	       , CMachineInfo::Get ()->GetMachineName ());
+	       , CIRCLE_VERSION_STRING, CMachineInfo::Get ()->GetMachineName ());
 
 	return TRUE;
 }
@@ -122,10 +121,20 @@ void CLogger::WriteV (const char *pSource, TLogSeverity Severity, const char *pM
 
 	CString Buffer;
 
+#ifdef USE_LOG_COLORS
+	switch (Severity)
+	{
+	case LogPanic:		Buffer = "\x1b[91m";	break;
+	case LogError:		Buffer = "\x1b[95m";	break;
+	case LogWarning:	Buffer = "\x1b[93m";	break;
+	default:		Buffer = "\x1b[97m";	break;
+	}
+#else
 	if (Severity == LogPanic)
 	{
 		Buffer = "\x1b[1m";
 	}
+#endif
 
 	if (m_pTimer != 0)
 	{
@@ -144,10 +153,17 @@ void CLogger::WriteV (const char *pSource, TLogSeverity Severity, const char *pM
 
 	Buffer.Append (Message);
 
+#ifdef USE_LOG_COLORS
+	if (Severity <= LogWarning)
+	{
+		Buffer.Append ("\x1b[97m");
+	}
+#else
 	if (Severity == LogPanic)
 	{
 		Buffer.Append ("\x1b[0m");
 	}
+#endif
 
 	Buffer.Append ("\n");
 
@@ -220,6 +236,11 @@ void CLogger::WriteNoAlloc (const char *pSource, TLogSeverity Severity, const ch
 
 CLogger *CLogger::Get (void)
 {
+	if (s_pThis == 0)
+	{
+		new CLogger (LogPanic);
+	}
+
 	return s_pThis;
 }
 
@@ -227,7 +248,10 @@ void CLogger::Write (const char *pString)
 {
 	unsigned long nLength = strlen (pString);
 
-	m_pTarget->Write (pString, nLength);
+	if (m_pTarget != 0)
+	{
+		m_pTarget->Write (pString, nLength);
+	}
 
 	m_SpinLock.Acquire ();
 
@@ -245,16 +269,23 @@ void CLogger::Write (const char *pString)
 
 		if (m_nInPtr == m_nOutPtr)
 		{
-			m_nInPtr = (m_nInPtr - 1) % LOGGER_BUFSIZE;
+			if (m_bOverwriteOldest)
+			{
+				m_nOutPtr = (m_nOutPtr + 1) % LOGGER_BUFSIZE;
+			}
+			else
+			{
+				m_nInPtr = (m_nInPtr - 1) % LOGGER_BUFSIZE;
 
-			break;
+				break;
+			}
 		}
 	}
 
 	m_SpinLock.Release ();
 }
 
-int CLogger::Read (void *pBuffer, unsigned nCount)
+int CLogger::Read (void *pBuffer, unsigned nCount, boolean bClear)
 {
 	m_SpinLock.Acquire ();
 
@@ -267,19 +298,25 @@ int CLogger::Read (void *pBuffer, unsigned nCount)
 
 	char *pchBuffer = (char *) pBuffer;
 	int nResult = 0;
+	unsigned nOutPtr = m_nOutPtr;
 
 	while (nCount--)
 	{
-		*pchBuffer++ = m_pBuffer[m_nOutPtr];
+		*pchBuffer++ = m_pBuffer[nOutPtr];
 
-		m_nOutPtr = (m_nOutPtr + 1) % LOGGER_BUFSIZE;
+		nOutPtr = (nOutPtr + 1) % LOGGER_BUFSIZE;
 
 		nResult++;
 
-		if (m_nInPtr == m_nOutPtr)
+		if (m_nInPtr == nOutPtr)
 		{
 			break;
 		}
+	}
+
+	if (bClear)
+	{
+		m_nOutPtr = nOutPtr;
 	}
 
 	m_SpinLock.Release ();

@@ -41,6 +41,20 @@ static unsigned s_nBufferSize = 0;
 
 
 /*-----------------------------------------------------------------------*/
+/* Callbacks                                                             */
+/*-----------------------------------------------------------------------*/
+
+static void disk_removed (
+	CDevice *pDevice,	/* device removed */
+	void *pContext
+)
+{
+	*((CDevice **) pContext) = 0;
+}
+
+
+
+/*-----------------------------------------------------------------------*/
 /* Get Drive Status                                                      */
 /*-----------------------------------------------------------------------*/
 
@@ -75,6 +89,8 @@ DSTATUS disk_initialize (
 	s_pVolume[pdrv] = CDeviceNameService::Get ()->GetDevice (s_pVolumeName[pdrv], TRUE);
 	if (s_pVolume[pdrv] != 0)
 	{
+		s_pVolume[pdrv]->RegisterRemovedHandler (disk_removed, &s_pVolume[pdrv]);
+
 		return 0;
 	}
 
@@ -213,6 +229,32 @@ DRESULT disk_ioctl (
 {
 	switch (cmd)
 	{
+	case GET_SECTOR_COUNT:
+		{
+			if (pdrv >= FF_VOLUMES)
+			{
+				return RES_PARERR;
+			}
+
+			CDevice *pDevice =
+				CDeviceNameService::Get ()->GetDevice (s_pVolumeName[pdrv], TRUE);
+			if (pDevice != 0)
+			{
+				u64 ullSize = pDevice->GetSize ();
+				if (ullSize == (u64) -1)
+				{
+					return RES_PARERR;
+				}
+
+				*(LBA_t *) buff = (LBA_t) (ullSize / SECTOR_SIZE);
+			}
+			else
+			{
+				return RES_NOTRDY;
+			}
+		}
+		return RES_OK;
+
 	case CTRL_SYNC:
 		return RES_OK;
 

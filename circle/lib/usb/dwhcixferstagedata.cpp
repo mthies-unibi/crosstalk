@@ -2,7 +2,7 @@
 // dwhcixferstagedata.cpp
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2014-2018  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2014-2022  R. Stange <rsta2@o2online.de>
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -21,11 +21,16 @@
 #include <circle/usb/dwhciframeschedper.h>
 #include <circle/usb/dwhciframeschednper.h>
 #include <circle/usb/dwhciframeschednsplit.h>
+#include <circle/usb/dwhciframeschediso.h>
 #include <circle/usb/dwhci.h>
 #include <circle/usb/usbhostcontroller.h>
 #include <circle/logger.h>
 #include <circle/timer.h>
 #include <assert.h>
+
+#define MAX_ISO_SPLIT_PAYLOAD	188
+
+#define MAX_BULK_TRIES		8
 
 CDWHCITransferStageData::CDWHCITransferStageData (unsigned	 nChannel,
 						  CUSBRequest	*pURB,
@@ -39,10 +44,11 @@ CDWHCITransferStageData::CDWHCITransferStageData (unsigned	 nChannel,
 	m_nTimeoutHZ (USB_TIMEOUT_NONE),
 	m_bSplitComplete (FALSE),
 	m_nTotalBytesTransfered (0),
+	m_nIsoPackets (0),
 	m_nState (0),
 	m_nSubState (0),
 	m_nTransactionStatus (0),
-	m_pTempBuffer (0),
+	m_nErrorCount (0),
 	m_nStartTicksHZ (0),
 	m_pFrameScheduler (0)
 {
@@ -75,7 +81,25 @@ CDWHCITransferStageData::CDWHCITransferStageData (unsigned	 nChannel,
 		
 		if (m_bSplitTransaction)
 		{
-			if (m_nTransferSize > m_nMaxPacketSize)
+			if (IsIsochronous ())
+			{
+				assert (m_pURB->GetNumIsoPackets () == 1);
+				assert (m_nTransferSize <= m_nMaxPacketSize);
+
+				if (   !m_bIn
+				    && m_nTransferSize > MAX_ISO_SPLIT_PAYLOAD)
+				{
+					m_nBytesPerTransaction = MAX_ISO_SPLIT_PAYLOAD;
+
+					m_nPackets =   (m_nTransferSize + MAX_ISO_SPLIT_PAYLOAD-1)
+						     / MAX_ISO_SPLIT_PAYLOAD;
+				}
+				else
+				{
+					m_nBytesPerTransaction = m_nTransferSize;
+				}
+			}
+			else if (m_nTransferSize > m_nMaxPacketSize)
 			{
 				m_nBytesPerTransaction = m_nMaxPacketSize;
 			}
@@ -88,16 +112,20 @@ CDWHCITransferStageData::CDWHCITransferStageData (unsigned	 nChannel,
 		}
 		else
 		{
+			if (IsIsochronous ())
+			{
+				m_nTransferSize = m_pURB->GetIsoPacketSize (0);
+				m_nPackets =   (m_nTransferSize + m_nMaxPacketSize - 1)
+					     / m_nMaxPacketSize;
+			}
+
 			m_nBytesPerTransaction = m_nTransferSize;
 			m_nPacketsPerTransaction = m_nPackets;
 		}
 	}
 	else
 	{
-		assert (m_pTempBuffer == 0);
-		m_pTempBuffer = new u32[1];
-		assert (m_pTempBuffer != 0);
-		m_pBufferPointer = m_pTempBuffer;
+		m_pBufferPointer = &m_TempBuffer;
 
 		m_nTransferSize = 0;
 		m_nBytesPerTransaction = 0;
@@ -110,7 +138,11 @@ CDWHCITransferStageData::CDWHCITransferStageData (unsigned	 nChannel,
 
 	if (m_bSplitTransaction)
 	{
-		if (IsPeriodic ())
+		if (IsIsochronous ())
+		{
+			m_pFrameScheduler = new CDWHCIFrameSchedulerIsochronous (m_bIn);
+		}
+		else if (IsPeriodic ())
 		{
 			m_pFrameScheduler = new CDWHCIFrameSchedulerPeriodic;
 		}
@@ -148,9 +180,6 @@ CDWHCITransferStageData::~CDWHCITransferStageData (void)
 
 	m_pBufferPointer = 0;
 
-	delete [] m_pTempBuffer;
-	m_pTempBuffer = 0;
-
 	m_pEndpoint = 0;
 	m_pDevice = 0;
 	m_pURB = 0;
@@ -182,26 +211,39 @@ void CDWHCITransferStageData::TransactionComplete (u32 nStatus, u32 nPacketsLeft
 		if (   (nStatus & DWHCI_HOST_CHAN_INT_NAK)
 		    && m_pURB->IsCompleteOnNAK ())
 		{
-			assert (m_pEndpoint->GetType () == EndpointTypeBulk);
 			assert (m_bIn);
 
 			m_nPackets = 0;		// no data is available, complete transfer
+
+			return;
 		}
 
-		return;
+		// bulk transfers with xact error will be retried, return otherwise
+		if (   !(nStatus & DWHCI_HOST_CHAN_INT_XACT_ERROR)
+		    || m_pEndpoint->GetType () != EndpointTypeBulk
+		    || ++m_nErrorCount > MAX_BULK_TRIES)
+		{
+			return;
+		}
 	}
 
 	u32 nPacketsTransfered = m_nPacketsPerTransaction - nPacketsLeft;
 	u32 nBytesTransfered = m_nBytesPerTransaction - nBytesLeft;
 
-	if (   m_bSplitTransaction
-	    && m_bSplitComplete
-	    && nBytesTransfered == 0
+	if (   nBytesTransfered == 0
 	    && m_nBytesPerTransaction > 0)
 	{
-		nBytesTransfered = m_nMaxPacketSize * nPacketsTransfered;
+		if (   m_bSplitTransaction
+		    && m_bSplitComplete)
+		{
+			nBytesTransfered = m_nMaxPacketSize * nPacketsTransfered;
+		}
+		else if (IsIsochronous ())
+		{
+			nBytesTransfered = m_nBytesPerTransaction * nPacketsTransfered;
+		}
 	}
-	
+
 	m_nTotalBytesTransfered += nBytesTransfered;
 	m_pBufferPointer = (u8 *) m_pBufferPointer + nBytesTransfered;
 	
@@ -211,8 +253,39 @@ void CDWHCITransferStageData::TransactionComplete (u32 nStatus, u32 nPacketsLeft
 		m_pEndpoint->SkipPID (nPacketsTransfered, m_bStatusStage);
 	}
 
-	assert (nPacketsTransfered <= m_nPackets);
+	// this shouldn't but does happen with some devices
+	if (nPacketsTransfered > m_nPackets)
+	{
+		m_nTransactionStatus |= DWHCI_HOST_CHAN_INT_FRAME_OVERRUN;
+		m_nErrorCount = MAX_BULK_TRIES+1;
+		m_nPackets = 0;
+
+		return;
+	}
+
 	m_nPackets -= nPacketsTransfered;
+
+	if (!m_bSplitTransaction)
+	{
+		if (!IsIsochronous ())
+		{
+			m_nPacketsPerTransaction = m_nPackets;
+		}
+		else
+		{
+			if (++m_nIsoPackets < m_pURB->GetNumIsoPackets ())
+			{
+				m_nTransferSize = m_pURB->GetIsoPacketSize (m_nIsoPackets);
+				m_nPackets =   (m_nTransferSize + m_nMaxPacketSize - 1)
+					     / m_nMaxPacketSize;
+
+				m_nBytesPerTransaction = m_nTransferSize;
+				m_nPacketsPerTransaction = m_nPackets;
+			}
+
+			return;
+		}
+	}
 
 	// if (m_nTotalBytesTransfered > m_nTransferSize) this will be false:
 	if (m_nTransferSize - m_nTotalBytesTransfered < m_nBytesPerTransaction)
@@ -249,11 +322,6 @@ unsigned CDWHCITransferStageData::GetSubState (void) const
 	return m_nSubState;
 }
 
-boolean CDWHCITransferStageData::BeginSplitCycle (void)
-{
-	return TRUE;
-}
-
 unsigned CDWHCITransferStageData::GetChannelNumber (void) const
 {
 	return m_nChannel;
@@ -266,6 +334,14 @@ boolean CDWHCITransferStageData::IsPeriodic (void) const
 	
 	return    Type == EndpointTypeInterrupt
 	       || Type == EndpointTypeIsochronous;
+}
+
+boolean CDWHCITransferStageData::IsIsochronous (void) const
+{
+	assert (m_pEndpoint != 0);
+	TEndpointType Type = m_pEndpoint->GetType ();
+
+	return Type == EndpointTypeIsochronous;
 }
 
 u8 CDWHCITransferStageData::GetDeviceAddress (void) const
@@ -292,6 +368,10 @@ u8 CDWHCITransferStageData::GetEndpointType (void) const
 
 	case EndpointTypeInterrupt:
 		nEndpointType = DWHCI_HOST_CHAN_CHARACTER_EP_TYPE_INTERRUPT;
+		break;
+
+	case EndpointTypeIsochronous:
+		nEndpointType = DWHCI_HOST_CHAN_CHARACTER_EP_TYPE_ISO;
 		break;
 
 	default:
@@ -403,7 +483,25 @@ u8 CDWHCITransferStageData::GetHubPortAddress (void) const
 
 u8 CDWHCITransferStageData::GetSplitPosition (void) const
 {
-	// only important for isochronous transfers
+	if (   m_bSplitTransaction
+	    && IsIsochronous ()
+	    && m_nTransferSize > MAX_ISO_SPLIT_PAYLOAD)
+	{
+		if (!m_nTotalBytesTransfered)
+		{
+			return DWHCI_HOST_CHAN_SPLIT_CTRL_BEGIN;
+		}
+
+		if (m_nPackets > 1)
+		{
+			return DWHCI_HOST_CHAN_SPLIT_CTRL_MID;
+		}
+		else
+		{
+			return DWHCI_HOST_CHAN_SPLIT_CTRL_END;
+		}
+	}
+
 	return DWHCI_HOST_CHAN_SPLIT_CTRL_ALL;
 }
 
@@ -428,6 +526,41 @@ u32 CDWHCITransferStageData::GetTransactionStatus (void) const
 {
 	assert (m_nTransactionStatus != 0);
 	return m_nTransactionStatus;
+}
+
+TUSBError CDWHCITransferStageData::GetUSBError (void) const
+{
+	if (m_nTransactionStatus & DWHCI_HOST_CHAN_INT_STALL)
+	{
+		return USBErrorStall;
+	}
+
+	if (m_nTransactionStatus & DWHCI_HOST_CHAN_INT_XACT_ERROR)
+	{
+		return USBErrorTransaction;
+	}
+
+	if (m_nTransactionStatus & DWHCI_HOST_CHAN_INT_BABBLE_ERROR)
+	{
+		return USBErrorBabble;
+	}
+
+	if (m_nTransactionStatus & DWHCI_HOST_CHAN_INT_FRAME_OVERRUN)
+	{
+		return USBErrorFrameOverrun;
+	}
+
+	if (m_nTransactionStatus & DWHCI_HOST_CHAN_INT_DATA_TOGGLE_ERROR)
+	{
+		return USBErrorDataToggle;
+	}
+
+	if (m_nTransactionStatus & DWHCI_HOST_CHAN_INT_AHB_ERROR)
+	{
+		return USBErrorHostBus;
+	}
+
+	return USBErrorUnknown;
 }
 
 boolean CDWHCITransferStageData::IsStageComplete (void) const
@@ -455,10 +588,21 @@ boolean CDWHCITransferStageData::IsTimeout (void) const
 	return CTimer::Get ()->GetTicks ()-m_nStartTicksHZ >= m_nTimeoutHZ ? TRUE : FALSE;
 }
 
+boolean CDWHCITransferStageData::IsRetryOK (void) const
+{
+	return m_nErrorCount <= MAX_BULK_TRIES;
+}
+
 CUSBRequest *CDWHCITransferStageData::GetURB (void) const
 {
 	assert (m_pURB != 0);
 	return m_pURB;
+}
+
+CUSBDevice *CDWHCITransferStageData::GetDevice (void) const
+{
+	assert (m_pDevice != 0);
+	return m_pDevice;
 }
 
 CDWHCIFrameScheduler *CDWHCITransferStageData::GetFrameScheduler (void) const

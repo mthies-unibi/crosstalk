@@ -2,7 +2,7 @@
 // xhciendpoint.cpp
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2019  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2019-2023  R. Stange <rsta2@o2online.de>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -22,6 +22,7 @@
 #include <circle/usb/xhciusbdevice.h>
 #include <circle/usb/xhcicommandmanager.h>
 #include <circle/usb/usbrequest.h>
+#include <circle/sched/scheduler.h>
 #include <circle/synchronize.h>
 #include <circle/sysconfig.h>
 #include <circle/logger.h>
@@ -40,7 +41,7 @@ CXHCIEndpoint::CXHCIEndpoint (CXHCIUSBDevice *pDevice, CXHCIDevice *pXHCIDevice)
 	m_pTransferRing (0),
 	m_uchEndpointID (1),
 	m_uchEndpointType (XHCI_EP_CONTEXT_EP_TYPE_CONTROL),
-	m_pURB (0),
+	m_pURB {0, 0},
 	m_bTransferCompleted (TRUE),
 	m_pInputContextBuffer (0)
 {
@@ -66,7 +67,7 @@ CXHCIEndpoint::CXHCIEndpoint (CXHCIUSBDevice *pDevice, const TUSBEndpointDescrip
 	m_pTransferRing (0),
 	m_uchEndpointID (0),
 	m_uchEndpointType (0),
-	m_pURB (0),
+	m_pURB {0, 0},
 	m_bTransferCompleted (TRUE),
 	m_pInputContextBuffer (0)
 {
@@ -90,13 +91,28 @@ CXHCIEndpoint::CXHCIEndpoint (CXHCIUSBDevice *pDevice, const TUSBEndpointDescrip
 	m_usMaxPacketSize = pDesc->wMaxPacketSize & 0x7FF;
 
 	assert (m_pDevice != 0);
-	if ((m_uchAttributes & 3) == 3)		// interrupt endpoint
+	if ((m_uchAttributes & 1) == 1)		// interrupt or isochronous endpoint
 	{
 		m_uchInterval = ConvertInterval (pDesc->bInterval, m_pDevice->GetSpeed ());
 	}
 	else
 	{
 		m_uchInterval = 0;
+	}
+
+	// workaround for low-speed devices with bulk endpoints,
+	// which is normally forbidden by the USB spec.
+	if (   m_pDevice->GetSpeed () == USBSpeedLow
+	    && (m_uchAttributes & 3) == 2)
+	{
+		m_uchAttributes = 3;		// fake interrupt endpoint
+
+		if (m_usMaxPacketSize > 8)
+		{
+			m_usMaxPacketSize = 8;
+		}
+
+		m_uchInterval = ConvertInterval (1, USBSpeedLow);
 	}
 
 	// calculate endpoint ID
@@ -212,10 +228,18 @@ boolean CXHCIEndpoint::Transfer (CUSBRequest *pURB, unsigned nTimeoutMs)
 			m_pDevice->DumpStatus ();
 #endif
 
+			m_SpinLock.Acquire ();
+			m_pURB[0] = m_pURB[1];
+			m_pURB[1] = 0;
+			m_SpinLock.Release ();
 			m_bTransferCompleted = TRUE;
 
 			return FALSE;
 		}
+
+#ifdef NO_BUSY_WAIT
+		CScheduler::Get ()->Yield ();
+#endif
 	}
 
 	DataMemBarrier ();
@@ -236,6 +260,18 @@ boolean CXHCIEndpoint::TransferAsync (CUSBRequest *pURB, unsigned nTimeoutMs)
 	void *pBuffer = pURB->GetBuffer ();
 	u32 nBufLen = pURB->GetBufLen ();
 
+	m_SpinLock.Acquire ();
+	if (m_pURB[0] == 0)
+	{
+		m_pURB[0] = pURB;
+	}
+	else
+	{
+		assert (m_pURB[1] == 0);
+		m_pURB[1] = pURB;
+	}
+	m_SpinLock.Release ();
+
 	if (   (m_uchEndpointType & 3) == 2		// bulk EP
 	    || (m_uchEndpointType & 3) == 3)		// interrupt EP
 	{
@@ -251,13 +287,11 @@ boolean CXHCIEndpoint::TransferAsync (CUSBRequest *pURB, unsigned nTimeoutMs)
 				 XHCI_TO_DMA_LO (pBuffer),
 				 XHCI_TO_DMA_HI (pBuffer)))
 		{
-			return FALSE;
+			goto EnqueueError;
 		}
 	}
-	else
+	else if (m_uchEndpointType == 4)		// control EP
 	{
-		assert (m_uchEndpointType == 4);	// control EP
-
 		TSetupData *pSetup = pURB->GetSetupData ();
 		assert (pSetup != 0);
 
@@ -294,7 +328,7 @@ boolean CXHCIEndpoint::TransferAsync (CUSBRequest *pURB, unsigned nTimeoutMs)
 				 | (u32) pSetup->wValue << 16,
 				 pSetup->wIndex | (u32) pSetup->wLength << 16))
 		{
-			return FALSE;
+			goto EnqueueError;
 		}
 
 		// DATA stage
@@ -311,7 +345,7 @@ boolean CXHCIEndpoint::TransferAsync (CUSBRequest *pURB, unsigned nTimeoutMs)
 					 XHCI_TO_DMA_LO (pBuffer),
 					 XHCI_TO_DMA_HI (pBuffer)))
 			{
-				return FALSE;
+				goto EnqueueError;
 			}
 		}
 
@@ -319,12 +353,37 @@ boolean CXHCIEndpoint::TransferAsync (CUSBRequest *pURB, unsigned nTimeoutMs)
 		if (!EnqueueTRB (  XHCI_TRB_TYPE_STATUS_STAGE << XHCI_TRB_CONTROL_TRB_TYPE__SHIFT
 				 | nDirStatus | XHCI_TRANSFER_TRB_CONTROL_IOC))
 		{
-			return FALSE;
+			goto EnqueueError;
 		}
 	}
+	else
+	{
+		assert ((m_uchEndpointType & 3) == 1);	// isochronous EP
 
-	assert (m_pURB == 0);
-	m_pURB = pURB;
+		assert (pBuffer != 0);
+		assert (nBufLen > 0);
+		assert ((uintptr) pBuffer > MEM_KERNEL_END);
+		CleanAndInvalidateDataCacheRange ((uintptr) pBuffer, nBufLen);
+
+		u32 nPackets = pURB->GetNumIsoPackets ();
+		for (unsigned i = 0; i < nPackets; i++)
+		{
+			u16 usPacketSize = pURB->GetIsoPacketSize (i);
+
+			if (!EnqueueTRB (  XHCI_TRB_TYPE_ISOCH << XHCI_TRB_CONTROL_TRB_TYPE__SHIFT
+					 | (i == nPackets-1 ? XHCI_TRANSFER_TRB_CONTROL_IOC : 0)
+					 | XHCI_TRANSFER_TRB_CONTROL_SIA,
+					   usPacketSize
+					 | (nPackets-i-1) << XHCI_TRANSFER_TRB_STATUS_TD_SIZE__SHIFT,
+					 XHCI_TO_DMA_LO (pBuffer),
+					 XHCI_TO_DMA_HI (pBuffer)))
+			{
+				goto EnqueueError;
+			}
+
+			pBuffer = (u8 *) pBuffer + usPacketSize;
+		}
+	}
 
 	DataSyncBarrier ();
 
@@ -333,11 +392,24 @@ boolean CXHCIEndpoint::TransferAsync (CUSBRequest *pURB, unsigned nTimeoutMs)
 	m_pMMIO->db_write32 (m_pDevice->GetSlotID (), XHCI_REG_DB_TARGET_EP0 + m_uchEndpointID-1);
 
 	return TRUE;
+
+EnqueueError:
+	m_SpinLock.Acquire ();
+	if (m_pURB[1] != 0)
+	{
+		m_pURB[1] = 0;
+	}
+	else
+	{
+		m_pURB[0] = 0;
+	}
+	m_SpinLock.Release ();
+
+	return FALSE;
 }
 
 void CXHCIEndpoint::TransferEvent (u8 uchCompletionCode, u32 nTransferLength)
 {
-
 #ifdef XHCI_DEBUG2
 	CLogger::Get ()->Write (From, LogDebug,
 				"Transfer event on endpoint %u (completion %u, length %u)",
@@ -347,8 +419,11 @@ void CXHCIEndpoint::TransferEvent (u8 uchCompletionCode, u32 nTransferLength)
 
 	DataMemBarrier ();
 
-	assert (m_pURB != 0);
-	CUSBRequest *pURB = m_pURB;
+	CUSBRequest *pURB = m_pURB[0];
+	if (!pURB)
+	{
+		return;
+	}
 
 	if (   XHCI_TRB_SUCCESS (uchCompletionCode)
 	    || uchCompletionCode == XHCI_TRB_COMPLETION_CODE_SHORT_PACKET)
@@ -366,13 +441,22 @@ void CXHCIEndpoint::TransferEvent (u8 uchCompletionCode, u32 nTransferLength)
 
 		pURB->SetStatus (1);
 	}
-	else
+	else if (   uchCompletionCode == XHCI_TRB_COMPLETION_CODE_RING_UNDERRUN
+		 || uchCompletionCode == XHCI_TRB_COMPLETION_CODE_RING_OVERRUN)
+	{
+		// these events are not URB related, so just ignore them
+		return;
+	}
+	else if (pURB->GetEndpoint ()->GetType () != EndpointTypeIsochronous)
 	{
 		CLogger::Get ()->Write (From, LogWarning, "Transfer error %u on endpoint %u",
 					(unsigned) uchCompletionCode, (unsigned) m_uchEndpointID);
 	}
 
-	m_pURB = 0;
+	m_SpinLock.Acquire ();
+	m_pURB[0] = m_pURB[1];
+	m_pURB[1] = 0;
+	m_SpinLock.Release ();
 
 	pURB->CallCompletionRoutine ();
 }
@@ -505,6 +589,13 @@ TXHCIInputContext *CXHCIEndpoint::GetInputContextConfigureEndpoint (void)
 	case XHCI_EP_CONTEXT_EP_TYPE_INTERRUPT_IN:
 		pEPContext->Interval = m_uchInterval;
 		pEPContext->AverageTRBLength = 16;	// best guess
+		pEPContext->MaxESITPayload = m_usMaxPacketSize;
+		break;
+
+	case XHCI_EP_CONTEXT_EP_TYPE_ISOCH_OUT:
+	case XHCI_EP_CONTEXT_EP_TYPE_ISOCH_IN:
+		pEPContext->Interval = m_uchInterval;
+		pEPContext->AverageTRBLength = m_usMaxPacketSize;
 		pEPContext->MaxESITPayload = m_usMaxPacketSize;
 		break;
 

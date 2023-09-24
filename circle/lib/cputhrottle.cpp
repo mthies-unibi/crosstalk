@@ -2,7 +2,7 @@
 // cputhrottle.cpp
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2016-2017  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2016-2022  R. Stange <rsta2@o2online.de>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -38,11 +38,26 @@ CCPUThrottle::CCPUThrottle (TCPUSpeed InitialSpeed)
 	m_nEnforcedTemperature (60000),
 	m_SpeedSet (CPUSpeedUnknown),
 	m_nTicksLastSet (0),
-	m_nTicksLastUpdate (0)
+	m_nTicksLastUpdate (0),
+	m_ThrottledStateMask (SystemStateNothingOccurred),
+	m_LastThrottledState (SystemStateNothingOccurred),
+	m_pThrottledHandler (0),
+	m_pThrottledParam (0),
+	m_bFanConnected (FALSE)
 {
 	assert (s_pThis == 0);
 	s_pThis = this;
 	assert (s_pThis != 0);
+
+	unsigned nFanPin = CKernelOptions::Get ()->GetGPIOFanPin ();
+	if (nFanPin > 0)
+	{
+		m_bFanConnected = TRUE;
+
+		m_FanPin.AssignPin (nFanPin);
+		m_FanPin.SetMode (GPIOModeOutput, FALSE);
+		m_FanPin.Write (HIGH);
+	}
 
 	if (InitialSpeed == CPUSpeedUnknown)
 	{
@@ -84,6 +99,13 @@ CCPUThrottle::CCPUThrottle (TCPUSpeed InitialSpeed)
 
 CCPUThrottle::~CCPUThrottle (void)
 {
+	m_pThrottledHandler = 0;
+
+	if (m_bFanConnected)
+	{
+		m_FanPin.SetMode (GPIOModeInput);
+	}
+
 	if (m_bDynamic)
 	{
 		SetSpeed (CPUSpeedLow, TRUE);
@@ -144,6 +166,32 @@ TCPUSpeed CCPUThrottle::SetSpeed (TCPUSpeed Speed, boolean bWait)
 
 boolean CCPUThrottle::SetOnTemperature (void)
 {
+	if (m_bFanConnected)
+	{
+		unsigned nTemperature = GetTemperature (PROPTAG_GET_TEMPERATURE);
+		if (nTemperature == 0)
+		{
+			return FALSE;
+		}
+
+		assert (40000 <= m_nEnforcedTemperature);
+		if (m_nEnforcedTemperature > m_nMaxTemperature)
+		{
+			m_nEnforcedTemperature = m_nMaxTemperature;
+		}
+
+		if (nTemperature > m_nEnforcedTemperature)
+		{
+			m_FanPin.Write (HIGH);
+		}
+		else if (nTemperature < (m_nEnforcedTemperature-5000))	// 5 degrees hysteresis
+		{
+			m_FanPin.Write (LOW);
+		}
+
+		return TRUE;
+	}
+
 	if (!m_bDynamic)
 	{
 		return TRUE;
@@ -197,10 +245,28 @@ boolean CCPUThrottle::Update (void)
 	{
 		bOK = SetOnTemperature ();
 
+		if (m_pThrottledHandler != 0)
+		{
+			bOK = CheckThrottledState () && bOK;
+		}
+
 		m_nTicksLastUpdate = nTicks;
 	}
 
 	return bOK;
+}
+
+void CCPUThrottle::RegisterSystemThrottledHandler (unsigned StateMask,
+						   TSystemThrottledHandler *pHandler, void *pParam)
+{
+	assert (StateMask != 0);
+	m_ThrottledStateMask = (TSystemThrottledState) StateMask;
+
+	assert (m_pThrottledHandler == 0);
+	m_pThrottledHandler = pHandler;
+	assert (m_pThrottledHandler != 0);
+
+	m_pThrottledParam = pParam;
 }
 
 void CCPUThrottle::DumpStatus (boolean bAll)
@@ -275,6 +341,31 @@ boolean CCPUThrottle::SetSpeedInternal (TCPUSpeed Speed, boolean bWait)
 	{
 		CTimer::SimpleusDelay (TRANSITION_DELAY_USECS);
 	}
+
+	return TRUE;
+}
+
+boolean CCPUThrottle::CheckThrottledState (void)
+{
+	CBcmPropertyTags Tags;
+	TPropertyTagSimple TagGetThrottled;
+	TagGetThrottled.nValue = 0xFFFF;
+	if (!Tags.GetTag (PROPTAG_GET_THROTTLED, &TagGetThrottled, sizeof TagGetThrottled, 4))
+	{
+		return FALSE;
+	}
+
+	TagGetThrottled.nValue &= m_ThrottledStateMask;
+
+	if (   TagGetThrottled.nValue != 0
+	    && TagGetThrottled.nValue != m_LastThrottledState)
+	{
+		assert (m_pThrottledHandler != 0);
+		(*m_pThrottledHandler) ((TSystemThrottledState) TagGetThrottled.nValue,
+					m_pThrottledParam);
+	}
+
+	m_LastThrottledState = (TSystemThrottledState) TagGetThrottled.nValue;
 
 	return TRUE;
 }

@@ -2,7 +2,7 @@
 // usbrequest.h
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2014-2017  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2014-2022  R. Stange <rsta2@o2online.de>
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -32,6 +32,9 @@ typedef void TURBCompletionRoutine (CUSBRequest *pURB, void *pParam, void *pCont
 class CUSBRequest		// URB
 {
 public:
+	static const unsigned MaxIsoPackets = 32;
+
+public:
 	CUSBRequest (CUSBEndpoint *pEndpoint, void *pBuffer, u32 nBufLen, TSetupData *pSetupData = 0);
 	~CUSBRequest (void);
 
@@ -39,14 +42,21 @@ public:
 
 	void SetStatus (int bStatus);
 	void SetResultLen (u32 nLength);
+	void SetUSBError (TUSBError Error);
 
 	int GetStatus (void) const;
 	u32 GetResultLength (void) const;
+	TUSBError GetUSBError (void) const;
 
 	TSetupData *GetSetupData (void);
 	void *GetBuffer (void);
 	u32 GetBufLen (void) const;
-	
+
+	// isochronous transfers are delimited in packets
+	void AddIsoPacket (u16 usPacketSize);
+	unsigned GetNumIsoPackets (void) const;
+	u16 GetIsoPacketSize (unsigned nPacketIndex) const;
+
 	void SetCompletionRoutine (TURBCompletionRoutine *pRoutine, void *pParam, void *pContext);
 	void CallCompletionRoutine (void);
 
@@ -63,7 +73,11 @@ private:
 	
 	int	    m_bStatus;
 	u32	    m_nResultLen;
-	
+	TUSBError   m_USBError;
+
+	unsigned    m_nNumIsoPackets;
+	u16	    m_usIsoPacketSize[MaxIsoPackets];
+
 	TURBCompletionRoutine *m_pCompletionRoutine;
 	void *m_pCompletionParam;
 	void *m_pCompletionContext;

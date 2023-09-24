@@ -2,7 +2,7 @@
 // dwhcixferstagedata.h
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
-// Copyright (C) 2014-2018  R. Stange <rsta2@o2online.de>
+// Copyright (C) 2014-2022  R. Stange <rsta2@o2online.de>
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -26,6 +26,7 @@
 #include <circle/usb/usbendpoint.h>
 #include <circle/usb/dwhciframescheduler.h>
 #include <circle/classallocator.h>
+#include <circle/synchronize.h>
 #include <circle/types.h>
 
 class CDWHCITransferStageData
@@ -47,12 +48,11 @@ public:
 	void SetSubState (unsigned nSubState);
 	unsigned GetSubState (void) const;
 
-	boolean BeginSplitCycle (void);
-
 	// get transaction parameters
 	unsigned GetChannelNumber (void) const;
 	u8 GetDeviceAddress (void) const;
 	boolean IsPeriodic (void) const;
+	boolean IsIsochronous (void) const;
 	u8 GetEndpointType (void) const;
 	u8 GetEndpointNumber (void) const;
 	u32 GetMaxPacketSize (void) const;
@@ -76,11 +76,14 @@ public:
 
 	// check status after transaction
 	u32 GetTransactionStatus (void) const;
+	TUSBError GetUSBError (void) const;
 	boolean IsStageComplete (void) const;
 	u32 GetResultLen (void) const;
 	boolean IsTimeout (void) const;
+	boolean IsRetryOK (void) const;
 
 	CUSBRequest *GetURB (void) const;
+	CUSBDevice *GetDevice (void) const;
 	CDWHCIFrameScheduler *GetFrameScheduler (void) const;
 
 private:
@@ -104,11 +107,14 @@ private:
 	unsigned	 m_nPacketsPerTransaction;
 	u32		 m_nTotalBytesTransfered;
 
+	unsigned	 m_nIsoPackets;
+
 	unsigned	 m_nState;
 	unsigned	 m_nSubState;
 	u32		 m_nTransactionStatus;
+	unsigned	 m_nErrorCount;
 
-	u32		*m_pTempBuffer;
+	DMA_BUFFER (u32, m_TempBuffer, 1);
 	void		*m_pBufferPointer;
 
 	unsigned	 m_nStartTicksHZ;

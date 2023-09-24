@@ -4042,7 +4042,13 @@ void Interpreter::primitiveBitShift()
     if (success())
     {
         integerResult = integerArgument >= 0 ? integerReceiver << integerArgument : integerReceiver >> -integerArgument;
-        success(memory.isIntegerValue(integerResult));
+        /* success(memory.isIntegerValue(integerResult)); */
+        success(memory.isIntegerValue(integerResult) && (integerArgument < 16 || integerReceiver == 0));
+        // right-shifts (-ve arg) are always safe
+        // left-shifts of non-zero receiver beyond the width of a small integer will alwways lose bits
+        // the latter case is dangerous: 2**13 (8192) is a valid small integer, shifting this left by 19 (or more)
+        // loses all bits, resulting in zero, which looks like another valid small integer, but is not the correct
+        // non-small integer result, of course (mthies)
     }
     if (success())
         pushInteger(integerResult);
