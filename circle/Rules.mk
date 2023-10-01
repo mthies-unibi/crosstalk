@@ -162,7 +162,8 @@ LDFLAGS	+= --gc-sections
 endif
 
 OPTIMIZE ?= -O2
-STANDARD ?= -std=c++14 -Wno-aligned-new
+STANDARD ?= -std=c++20 -Wno-aligned-new
+# STANDARD ?= -std=c++14 -Wno-aligned-new
 
 INCLUDE	+= -I $(CIRCLEHOME)/include -I $(CIRCLEHOME)/addon -I $(CIRCLEHOME)/app/lib \
 	   -I $(CIRCLEHOME)/addon/vc4 -I $(CIRCLEHOME)/addon/vc4/interface/khronos/include

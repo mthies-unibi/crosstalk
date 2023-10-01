@@ -601,6 +601,22 @@ static inline void expand_pixel(Pixel *destPixel, std::uint16_t srcWord, int src
         }
     }
     
+    void VirtualMachine::handle_cooked_keyboard_key(char *keySeq)
+    {
+        std::uint16_t param = keySeq[0];
+        if (param == 0 || param > 127 || keySeq[1] != 0)
+            return;
+        // ignore NUL, non-ASCII characters and special keys mapped to an <ESC> sequence for now
+        // TODO do we need to <Ctrl> characters in a special way
+        // <Enter> sends <LF> 0x0a which selects last text chunk entered (like <ESC>); 0x0d <CR> needs to be sent instead
+        // codes like <Ctrl-D> 0x04 or <Ctrl-F> 0x06 are not recognized by Smalltalk; looks like we need to send 3, 138 3, 'D' 4, 'D' 4, 138 instead?
+        // FIXME anything needed to make Caps Lock and its LED work? Caps Lock works, but LED does not update!
+        queue_input_time_words();
+        queue_input_word(3, param);
+        queue_input_word(4, param);
+
+    }
+
     void VirtualMachine::handle_mouse_button_event(unsigned buttons, int down)
     {
         // The bluebook got these wrong!
@@ -705,6 +721,11 @@ static inline void expand_pixel(Pixel *destPixel, std::uint16_t srcWord, int src
                 handle_keyboard_event(keys[i]);
             }
         }
+
+        char keySeq[6];
+        CKernel::Get()->GetCookedKeyboardKey(keySeq);
+        if (keySeq[0])
+            handle_cooked_keyboard_key(keySeq);
 
         CKernel::Get()->GetMouseState(&x, &y, &mouse_mb);
         x = x - off_x;

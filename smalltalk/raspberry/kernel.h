@@ -36,6 +36,9 @@
 #include <fatfs/ff.h>
 #include <circle/types.h>
 
+
+#define USE_COOKED_KEYBOARD  // experimental (mthies)
+
 enum TShutdownMode
 {
 	ShutdownNone,
@@ -58,6 +61,7 @@ public:
 
         void GetMouseState (int *x, int *y, unsigned *buttons);
 	int GetKeyboardState (unsigned *keys);
+	void GetCookedKeyboardKey (char *keySeq);
 	unsigned GetTicks (void);
 
         void SetMouseState (int x, int y);
@@ -66,7 +70,8 @@ public:
 	unsigned GetCursorColor (void);
 
 private:
-        static void KeyPressedHandler (const char *pString);
+        static void KeyPressedHandlerStub (const char *pString);
+        void KeyPressedHandler (const char *pString);
         static void KeyStatusHandlerRawStub (unsigned char ucModifiers, const unsigned char RawKeys[6]);
         void KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned char RawKeys[6]);
 
@@ -104,6 +109,8 @@ private:
 	unsigned m_nBootMode = 0;
 
         int m_RawKeys[6] = {0};
+	// TODO need only either the one abover or the one below, depending on USE_COOKED_KEYBOARD
+	char m_CookedKeySeq[6] = {0};  // special keys report sequences of up to 6 characters like <ESC>[12~<NUL>
 
 	volatile TShutdownMode m_ShutdownMode;
 

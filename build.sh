@@ -1,4 +1,13 @@
 #!/bin/bash
+# needs
+# export PATH="$HOME/SWDevelopment/arm-toolchains/arm-gnu-toolchain-12.3.rel1-darwin-x86_64-arm-none-eabi/bin:$PATH"
+# to find Arm compiler tools like arm-none-eabi-gcc
+
+if ! type arm-none-eabi-gcc > /dev/null; then
+  echo "Need to add Arm compiler toolchain to path!"
+  echo "export PATH=\"\$HOME/SWDevelopment/arm-toolchains/arm-gnu-toolchain-12.3.rel1-darwin-x86_64-arm-none-eabi/bin:\$PATH\""
+  exit 5
+fi
 
 function clean {
   pushd . > /dev/null 2>&1

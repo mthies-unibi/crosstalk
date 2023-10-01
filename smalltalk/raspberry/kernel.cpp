@@ -1,4 +1,3 @@
-//
 // kernel.cpp
 //
 // Circle - A C++ bare metal environment for Raspberry Pi
@@ -24,6 +23,8 @@
 #include <circle/string.h>
 #include <circle/util.h>
 #include <smalltalk.h>
+
+#define EXPAND_CHARACTERS
 
 #define PARTITION       "emmc1-1"
 
@@ -148,8 +149,13 @@ TShutdownMode CKernel::Run (void)
                 return ShutdownHalt;
         }
 
-        // pKeyboard->RegisterKeyPressedHandler (KeyPressedHandler);
+	// pKeyboard->RegisterRemovedHandler (KeyboardRemovedHandler);
+#ifdef USE_COOKED_KEYBOARD
+	// pKeyboard->RegisterShutdownHandler (ShutdownHandler);
+        pKeyboard->RegisterKeyPressedHandler (KeyPressedHandlerStub);
+#else
         pKeyboard->RegisterKeyStatusHandlerRaw (KeyStatusHandlerRawStub);
+#endif
 
 	CMouseDevice *pMouse = (CMouseDevice *) m_DeviceNameService.GetDevice ("mouse1", FALSE);
 	if (pMouse == 0)
@@ -191,6 +197,10 @@ TShutdownMode CKernel::Run (void)
 	{
 		pMouse->UpdateCursor ();
 
+#ifdef USE_COOKED_KEYBOARD
+		pKeyboard->UpdatedLEDs ();  // required to make Caps Lock LED reflect the key state
+#endif
+
 		m_Screen.Rotor (0, nCount);
 	}
 #endif
@@ -198,13 +208,30 @@ TShutdownMode CKernel::Run (void)
 	return m_ShutdownMode;
 }
 
-void CKernel::KeyPressedHandler (const char *pString)
+void CKernel::KeyPressedHandlerStub (const char *pString)
 {
         assert (s_pThis != 0);
-        s_pThis->m_Screen.Write (pString, strlen (pString));
-        s_pThis->m_Logger.Write (FromKernel, LogDebug, "Keyboard: %s", pString);
+        // s_pThis->m_Screen.Write (pString, strlen (pString));
+        // s_pThis->m_Logger.Write (FromKernel, LogDebug, "Keyboard: %s", pString);
+        s_pThis->KeyPressedHandler (pString);
 }
 
+void CKernel::KeyPressedHandler (const char *pString)
+{
+	assert (s_pThis != 0);
+	strcpy (m_CookedKeySeq, pString);
+#ifdef EXPAND_CHARACTERS
+	while (*pString)
+	{
+		CString s;
+		s.Format ("'%c' %d %02X\n", *pString, *pString, *pString);
+		pString++;
+		s_pThis->m_Screen.Write (s, strlen (s));
+	}
+#else
+	s_pThis->m_Screen.Write (pString, strlen (pString));
+#endif
+}
 
 void CKernel::KeyStatusHandlerRawStub (unsigned char ucModifiers, const unsigned char RawKeys[6])
 {
@@ -230,7 +257,7 @@ void CKernel::KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned cha
                 }
         }
 
-//        s_pThis->m_Logger.Write (FromKernel, LogNotice, Message);
+        s_pThis->m_Logger.Write (FromKernel, LogNotice, Message);
 }
 
 void CKernel::MouseEventHandler (TMouseEvent Event, unsigned nButtons, unsigned nPosX, unsigned nPosY, int nWheelMove)
@@ -330,6 +357,11 @@ int CKernel::GetKeyboardState (unsigned *keys) {
                 }
         }
 	return n;
+}
+
+void CKernel::GetCookedKeyboardKey (char *keySeq) {
+	strcpy(keySeq, m_CookedKeySeq);
+	m_CookedKeySeq[0] = 0;
 }
 
 void CKernel::SetMouseState (int x, int y) {

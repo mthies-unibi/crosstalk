@@ -1,4 +1,0 @@
-  CPP   emmc.o
-  CPP   mmchost.o
-  CPP   sdhost.o
-  AR    libsdcard.a

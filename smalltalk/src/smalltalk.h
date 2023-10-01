@@ -124,6 +124,7 @@ public:
     void queue_input_word(uint16_t, uint16_t);
     void queue_input_time_words();
     void handle_keyboard_event(int);
+    void handle_cooked_keyboard_key(char *);
     void handle_mouse_button_event(unsigned, int);
     void handle_mouse_movement_event(int, int);
 
