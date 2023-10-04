@@ -68,7 +68,7 @@ u8 CKeyboardBehaviour::GetLEDStatus (void) const
 void CKeyboardBehaviour::GenerateKeyEvent (u8 ucKeyCode)
 {
 	const char *pKeyString;
-	char Buffer[2];
+	char Buffer[3];
 
 	u8 ucModifiers = m_ucModifiers;
 	u16 usLogCode = m_KeyMap.Translate (ucKeyCode, ucModifiers);

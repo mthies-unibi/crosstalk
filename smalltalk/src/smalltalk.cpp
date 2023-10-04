@@ -604,7 +604,8 @@ static inline void expand_pixel(Pixel *destPixel, std::uint16_t srcWord, int src
     void VirtualMachine::handle_cooked_keyboard_key(char *keySeq)
     {
         std::uint16_t param = keySeq[0];
-        if (param == 0 || param > 127 || keySeq[1] != 0)
+        std::uint16_t ctrl_state = keySeq[1];
+        if (param == 0 || param > 127 || ctrl_state > 3)
             return;
         // ignore NUL, non-ASCII characters and special keys mapped to an <ESC> sequence for now
         // TODO do we need to <Ctrl> characters in a special way
@@ -612,9 +613,16 @@ static inline void expand_pixel(Pixel *destPixel, std::uint16_t srcWord, int src
         // codes like <Ctrl-D> 0x04 or <Ctrl-F> 0x06 are not recognized by Smalltalk; looks like we need to send 3, 138 3, 'D' 4, 'D' 4, 138 instead?
         // FIXME anything needed to make Caps Lock and its LED work? Caps Lock works, but LED does not update!
         queue_input_time_words();
+        if (ctrl_state & 1)
+            queue_input_word(3, 138);
+        if (ctrl_state & 2)
+            queue_input_word(3, 136);
         queue_input_word(3, param);
         queue_input_word(4, param);
-
+        if (ctrl_state & 2)
+            queue_input_word(4, 136);
+        if (ctrl_state & 1)
+            queue_input_word(4, 138);
     }
 
     void VirtualMachine::handle_mouse_button_event(unsigned buttons, int down)

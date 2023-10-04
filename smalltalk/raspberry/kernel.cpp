@@ -29,6 +29,7 @@
 #define PARTITION       "emmc1-1"
 
 static const char ClearScreen[] = "\x1b[H\x1b[J\x1b[?25l";
+static const char GoodByeMessage[] = "The world has come to an end.";
 
 int losgehts = 0;
 
@@ -151,6 +152,7 @@ TShutdownMode CKernel::Run (void)
 
 	// pKeyboard->RegisterRemovedHandler (KeyboardRemovedHandler);
 #ifdef USE_COOKED_KEYBOARD
+	m_pKeyboard = pKeyboard;
 	// pKeyboard->RegisterShutdownHandler (ShutdownHandler);
         pKeyboard->RegisterKeyPressedHandler (KeyPressedHandlerStub);
 #else
@@ -192,19 +194,22 @@ TShutdownMode CKernel::Run (void)
 	smalltalk();
 	m_Logger.Write (FromKernel, LogDebug, "Ending smalltalk");
 
+	m_Screen.Write (ClearScreen, sizeof ClearScreen-1);
+
 #if 1
 	for (unsigned nCount = 0; m_ShutdownMode == ShutdownNone; nCount++)
 	{
 		pMouse->UpdateCursor ();
 
 #ifdef USE_COOKED_KEYBOARD
-		pKeyboard->UpdatedLEDs ();  // required to make Caps Lock LED reflect the key state
+		pKeyboard->UpdateLEDs ();  // required to make Caps Lock LED reflect the key state
 #endif
 
 		m_Screen.Rotor (0, nCount);
 	}
 #endif
 
+	m_Screen.Write(GoodByeMessage, sizeof GoodByeMessage-1);
 	return m_ShutdownMode;
 }
 
@@ -220,6 +225,7 @@ void CKernel::KeyPressedHandler (const char *pString)
 {
 	assert (s_pThis != 0);
 	strcpy (m_CookedKeySeq, pString);
+#ifdef LOG_KEYBOARD
 #ifdef EXPAND_CHARACTERS
 	while (*pString)
 	{
@@ -230,6 +236,7 @@ void CKernel::KeyPressedHandler (const char *pString)
 	}
 #else
 	s_pThis->m_Screen.Write (pString, strlen (pString));
+#endif
 #endif
 }
 
@@ -243,21 +250,27 @@ void CKernel::KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned cha
 {
         assert (s_pThis != 0);
 
+#ifdef LOG_KEYBOARD
         CString Message;
         Message.Format ("Key status (modifiers %02X)", (unsigned) ucModifiers);
+#endif
 
         for (unsigned i = 0; i < 6; i++)
         {
                 if (RawKeys[i] != 0)
                 {
+#ifdef LOG_KEYBOARD
                         CString KeyCode;
                         KeyCode.Format (" %02X", (unsigned) RawKeys[i]);
                         Message.Append (KeyCode);
+#endif
                         m_RawKeys[i] = RawKeys[i] | ((ucModifiers & 0xff) << 8);
                 }
         }
 
+#ifdef LOG_KEYBOARD
         s_pThis->m_Logger.Write (FromKernel, LogNotice, Message);
+#endif
 }
 
 void CKernel::MouseEventHandler (TMouseEvent Event, unsigned nButtons, unsigned nPosX, unsigned nPosY, int nWheelMove)
@@ -362,6 +375,12 @@ int CKernel::GetKeyboardState (unsigned *keys) {
 void CKernel::GetCookedKeyboardKey (char *keySeq) {
 	strcpy(keySeq, m_CookedKeySeq);
 	m_CookedKeySeq[0] = 0;
+}
+
+void CKernel::UpdateKeyboardLEDs (void) {
+#ifdef USE_COOKED_KEYBOARD
+	m_pKeyboard->UpdateLEDs();
+#endif
 }
 
 void CKernel::SetMouseState (int x, int y) {

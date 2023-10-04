@@ -126,7 +126,7 @@ public:
 	boolean SetEntry (u8 nTable, u8 nPhyCode, u16 nValue);
 
 	u16 Translate (u8 nPhyCode, u8 nModifiers);
-	const char *GetString (u16 nKeyCode, u8 nModifiers, char Buffer[2]) const;
+	const char *GetString (u16 nKeyCode, u8 nModifiers, char Buffer[3]) const;
 
 	u8 GetLEDStatus (void) const;
 
@@ -139,6 +139,8 @@ private:
 	boolean m_bCapsLock;
 	boolean m_bNumLock;
 	boolean m_bScrollLock;
+
+	u8 m_CtrlUSMap[128];
 	
 	static const char *s_KeyStrings[KeyMaxCode-KeySpace];
 	static const u16 s_DefaultMap[][PHY_MAX_CODE+1][K_CTRLTAB+1];

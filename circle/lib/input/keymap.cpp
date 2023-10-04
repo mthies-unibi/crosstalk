@@ -37,15 +37,15 @@ const char *CKeyMap::s_KeyStrings[KeyMaxCode-KeySpace] =
 {
 	" ",			// KeySpace
 	"\x1b",			// KeyEscape
-	"\x7f",			// KeyBackspace
+	"\b",			// KeyBackspace  // was \x7f
 	"\t",			// KeyTabulator
-	"\n",			// KeyReturn
+	"\r",			// KeyReturn  // was \n
 	"\x1b[2~",		// KeyInsert
 	"\x1b[1~",		// KeyHome
 	"\x1b[1;5H",		// KeyCtrlHome
 	"\x1b[5~",		// KeyPageUp
 	"\x1b[5;5~",		// KeyCtrlPageUp
-	"\x1b[3~",		// KeyDelete
+	"\x7f",			// KeyDelete  //was \x1b[3~
 	"\x1b[4~",		// KeyEnd
 	"\x1b[1;5F",		// KeyCtrlEnd
 	"\x1b[6~",		// KeyPageDown
@@ -147,6 +147,15 @@ CKeyMap::CKeyMap (void)
 
 	assert (sizeof m_KeyMap == sizeof s_DefaultMap[0]);
 	memcpy (m_KeyMap, pDefaultMap, sizeof m_KeyMap);
+	memset(m_CtrlUSMap, 0, sizeof(m_CtrlUSMap));
+	const u16 (*usMap)[PHY_MAX_CODE+1][K_CTRLTAB+1] = &CKeyMap::s_DefaultMap[5];
+	for (unsigned nPhyCode = 0; nPhyCode <= PHY_MAX_CODE; nPhyCode++)
+	{
+		u16 usLogCodeNorm = (*usMap)[nPhyCode][K_NORMTAB];
+		u16 usLogCodeShift = (*usMap)[nPhyCode][K_SHIFTTAB];
+		if (usLogCodeNorm <= 127) m_CtrlUSMap[usLogCodeNorm] = usLogCodeNorm;
+		if (usLogCodeShift <= 127) m_CtrlUSMap[usLogCodeShift] = 0x80 | usLogCodeNorm;
+	}
 }
 
 CKeyMap::~CKeyMap (void)
@@ -235,7 +244,8 @@ u16 CKeyMap::Translate (u8 nPhyCode, u8 nModifiers)
 	{
 		nTable = K_SHIFTTAB;
 	}
-	// Use the CTRL table is a ctrl key is pressed, unless the key
+#if 0  // no longer relevant
+	// Use the CTRL table if a ctrl key is pressed, unless the key
 	//   is a basic letter. This way we only need to enter the 'special'
 	//   ctrl keys in the mapping table, as GetString will take care of
 	//   the letter keys.
@@ -244,6 +254,7 @@ u16 CKeyMap::Translate (u8 nPhyCode, u8 nModifiers)
 	{
 		nTable = K_CTRLTAB;
 	}
+#endif
 
 	u16 nLogCode = m_KeyMap[nPhyCode][nTable];
 
@@ -265,7 +276,7 @@ u16 CKeyMap::Translate (u8 nPhyCode, u8 nModifiers)
 	return nLogCode;
 }
 
-const char *CKeyMap::GetString (u16 nKeyCode, u8 nModifiers, char Buffer[2]) const
+const char *CKeyMap::GetString (u16 nKeyCode, u8 nModifiers, char Buffer[3]) const
 {
 	if (   nKeyCode <= ' '
 	    || nKeyCode >= KeyMaxCode)
@@ -282,6 +293,18 @@ const char *CKeyMap::GetString (u16 nKeyCode, u8 nModifiers, char Buffer[2]) con
 		
 	if (nModifiers & (KEY_LCTRL_MASK | KEY_RCTRL_MASK))
 	{
+		u8 usCtrlMap;
+		if (0 <= chChar /* && chChar < 128i */)
+			usCtrlMap = m_CtrlUSMap[chChar & 0x7f];
+		else
+			usCtrlMap = 0;
+		if (usCtrlMap == 0)
+			return 0;
+		Buffer[0] = usCtrlMap & 0x7f;
+		Buffer[1] = (usCtrlMap &0x80) ? 3 : 1;
+		Buffer[2] = '\0';
+		return Buffer;
+#if 0
 		chChar -= 'a';
 		if ('\0' <= chChar && chChar <= 'z'-'a')
 		{
@@ -292,6 +315,7 @@ const char *CKeyMap::GetString (u16 nKeyCode, u8 nModifiers, char Buffer[2]) con
 		}
 		
 		return 0;
+#endif
 	}
 
 	if (m_bCapsLock)

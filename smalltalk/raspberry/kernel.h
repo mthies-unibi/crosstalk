@@ -38,6 +38,9 @@
 
 
 #define USE_COOKED_KEYBOARD  // experimental (mthies)
+#ifdef USE_COOKED_KEYBOARD
+#include <circle/usb/usbkeyboard.h>
+#endif
 
 enum TShutdownMode
 {
@@ -62,6 +65,7 @@ public:
         void GetMouseState (int *x, int *y, unsigned *buttons);
 	int GetKeyboardState (unsigned *keys);
 	void GetCookedKeyboardKey (char *keySeq);
+	void UpdateKeyboardLEDs (void);
 	unsigned GetTicks (void);
 
         void SetMouseState (int x, int y);
@@ -110,6 +114,7 @@ private:
 
         int m_RawKeys[6] = {0};
 	// TODO need only either the one abover or the one below, depending on USE_COOKED_KEYBOARD
+	CUSBKeyboardDevice *m_pKeyboard;
 	char m_CookedKeySeq[6] = {0};  // special keys report sequences of up to 6 characters like <ESC>[12~<NUL>
 
 	volatile TShutdownMode m_ShutdownMode;
