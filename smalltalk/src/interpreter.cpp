@@ -4041,11 +4041,26 @@ void Interpreter::primitiveBitShift()
     integerReceiver = popInteger();
     if (success())
     {
-        integerResult = integerArgument >= 0 ? integerReceiver << integerArgument : integerReceiver >> -integerArgument;
-        /* success(memory.isIntegerValue(integerResult)); */
+        /* integerResult = integerArgument >= 0 ? integerReceiver << integerArgument : integerReceiver >> -integerArgument; */
+        if (integerArgument > 0) {
+            if (integerArgument < 32)
+                integerResult = integerReceiver << integerArgument;
+            else
+                integerResult = 0;
+        }
+        else if (integerArgument < 0) {
+            if (integerArgument > -31)
+                integerResult = integerReceiver >> -integerArgument;
+            else
+                integerResult = integerReceiver >> 31;
+        }
+        else  /* shift by 0 does nothing */
+            integerResult = integerReceiver;
+            /* according to cppreference a shift distance of 0 is well-defined,
+             * but not a distance < 0 or >= the number of bits in the promoted left operand */
         success(memory.isIntegerValue(integerResult) && (integerArgument < 16 || integerReceiver == 0));
         // right-shifts (-ve arg) are always safe
-        // left-shifts of non-zero receiver beyond the width of a small integer will alwways lose bits
+        // left-shifts of non-zero receiver beyond the width of a small integer will always lose bits
         // the latter case is dangerous: 2**13 (8192) is a valid small integer, shifting this left by 19 (or more)
         // loses all bits, resulting in zero, which looks like another valid small integer, but is not the correct
         // non-small integer result, of course (mthies)
