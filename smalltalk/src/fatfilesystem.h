@@ -44,6 +44,9 @@
 #include <circle/logger.h>
 #include <fatfs/ff.h>
 
+#define MAX_OPEN_FILES 64
+#define NO_FIL ((FIL*) 0)
+
 static const char FromKernel[] = "runtime";
 
 class FatST80FileSystem: public IFileSystem
@@ -56,12 +59,11 @@ public:
 
     FatST80FileSystem(const std::string& root) : root_directory(root)
     {
-        for (int i=0; i<100; i++) fdtofil[i] = (FIL*)0;
-        curfd = 0;
+        init();
     }
 
     void init() {
-        for (int i=0; i<100; i++) fdtofil[i] = (FIL*)0;
+        for (int i=0; i<MAX_OPEN_FILES; i++) fdtofil[i] = NO_FIL;
         curfd = 0;
     }
 
@@ -93,11 +95,24 @@ public:
 
     int getfd()
     {
-        // TODO: reallocate free file descriptors...
-        if (curfd < 100)
-          return curfd++;
-        else
-          return -1;
+        int initial_curfd = curfd;
+        while (curfd < MAX_OPEN_FILES)
+        {
+            if (fdtofil[curfd] == NO_FIL)
+                return curfd++;
+            else
+                curfd += 1;
+        }
+        curfd = 0;
+        while (curfd < initial_curfd)
+        {
+            if (fdtofil[curfd] == NO_FIL)
+                return curfd++;
+            else
+                curfd += 1;
+        }
+        CLogger::Get ()->Write ("fatfs", LogDebug, "getfd: too many open files %d", MAX_OPEN_FILES);
+        return -1;
     }
 
     // File oriented operations
@@ -107,7 +122,7 @@ public:
 
         int fd;
         FIL* fp = (FIL*)malloc(sizeof(FIL));
-        if (fp == 0) CLogger::Get ()->Write ("fatfs", LogDebug, "malloc failed");
+        if (fp == 0) CLogger::Get ()->Write ("fatfs", LogDebug, "open: malloc failed");
         FRESULT fres;
 
         // CLogger::Get ()->Write ("fatfs", LogDebug, "Entry2");
@@ -132,6 +147,7 @@ public:
     {
         int fd;
         FIL* fp = (FIL*)malloc(sizeof(FIL));
+        if (fp == 0) CLogger::Get ()->Write ("fatfs", LogDebug, "create: malloc failed");
         FRESULT fres;
         std::string path = path_for_file(name);
         // CLogger::Get ()->Write (FromKernel, LogDebug, "Creating file: ");
@@ -140,34 +156,32 @@ public:
         fres = f_open(fp, path.c_str(), FA_READ|FA_WRITE|FA_CREATE_ALWAYS);
         if (fres != FR_OK) return -1;
         fd = getfd();
-        fdtofil[fd] = fp;        
-        char s[80];
-        sprintf(s, "fd = %d\r\n", fd);
+        fdtofil[fd] = fp;
+        // char s[80];
+        // sprintf(s, "fd = %d\r\n", fd);
         // CLogger::Get ()->Write (FromKernel, LogDebug, (char *)s);
         return fd;
     }
     
     int close_file(int file_handle)
     {
-        char s[80];
-        sprintf(s, "Closing file: %d\r\n", file_handle);
+        // char s[80];
+        // sprintf(s, "Closing file: %d\r\n", file_handle);
         // CLogger::Get ()->Write (FromKernel, LogDebug, (char *)s);
-        if (fdtofil[file_handle] != (FIL*)0) {
+        if (fdtofil[file_handle] != NO_FIL) {
             f_close(fdtofil[file_handle]);
             free(fdtofil[file_handle]);
+            fdtofil[file_handle] = NO_FIL;
             return 0;
         } else { return -1; }
     }
 
     int read(int file_handle, char *buffer, int bytes)
     {
-        FIL* fp;
         FRESULT fres;
         int bytes_read;
-        int pos;
 
-        if (fdtofil[file_handle] != (FIL*)0) {
-            pos = fdtofil[file_handle]->fptr;
+        if (fdtofil[file_handle] != NO_FIL) {
             fres = f_read(fdtofil[file_handle], buffer, bytes, (UINT*)&bytes_read);
             if (fres != FR_OK) return -1;
             return bytes_read;
@@ -176,11 +190,10 @@ public:
 
     int write(int file_handle, const char *buffer, int bytes)
     {
-        FIL* fp;
         FRESULT fres;
         int bytes_written;
 
-        if (fdtofil[file_handle] != (FIL*)0) {
+        if (fdtofil[file_handle] != NO_FIL) {
             fres = f_write(fdtofil[file_handle], buffer, bytes, (UINT*)&bytes_written);
             if (fres != FR_OK) { CLogger::Get ()->Write (FromKernel, LogDebug, "write err!\r\n"); return -1; }
             return bytes_written;
@@ -189,12 +202,9 @@ public:
 
     bool truncate_to(int file_handle, int length)
     {
-        FIL* fp;
         FRESULT fres;
-        int bytes_written;
-        char s[80];
         
-        if (fdtofil[file_handle] != (FIL*)0) {
+        if (fdtofil[file_handle] != NO_FIL) {
             fres = f_lseek(fdtofil[file_handle], length);
             if (fres != FR_OK) return false;
             fres = f_truncate(fdtofil[file_handle]);
@@ -206,12 +216,9 @@ public:
 
     int file_size(int file_handle)
     {
-        FIL* fp;
         int fsize;
-        int bytes_written;
-        char s[80];
         
-        if (fdtofil[file_handle] != (FIL*)0) {
+        if (fdtofil[file_handle] != NO_FIL) {
             fsize = f_size(fdtofil[file_handle]);
             // CLogger::Get ()->Write (FromKernel, LogDebug, "Checking file size fd %d = %08d\r\n", file_handle, fsize);
             return fsize; // TODO: real position may be different?
@@ -220,25 +227,23 @@ public:
 
     bool file_flush(int file_handle)
     {
-#if 0
-        FIL* fp;
+#if 1
         FRESULT fres;
-        int bytes_written;
 
-        if (fdtofil[file_handle] != (FIL*)0) {
+        if (fdtofil[file_handle] != NO_FIL) {
             fres = f_sync(fdtofil[file_handle]);
-            if (fres != FR_OK) return -1;
-            return 0;
-        } else { return -1; }
-#endif
+            if (fres != FR_OK) return false;
+            return true;
+        } else { return false; }
+#else
         CLogger::Get ()->Write (FromKernel, LogDebug, "file_flush unimplemented!\r\n");
         return false;
+#endif
     }
     
     bool is_directory(const char *name)
     {
         FILINFO fi;
-        FRESULT fr;
 
         // CLogger::Get ()->Write (FromKernel, LogDebug, "is_directory: ");
         // CLogger::Get ()->Write (FromKernel, LogDebug, (char *)name);
@@ -276,11 +281,13 @@ public:
     {
         DIR *dir;
         FRESULT fr;
-        FILINFO fi;
 
         dir = (DIR*)malloc(sizeof(DIR));
         fr = f_opendir(dir, (const char*)root_directory.c_str());
-        return (void *)dir;
+        if (fr == FR_OK)
+            return (void *)dir;
+        else
+            return 0;
     }
 
     void close_dir(void *p)
@@ -375,11 +382,9 @@ public:
 
     int seek_to(int file_handle, int position)
     {
-        FIL* fp;
         FRESULT fres;
-        int bytes_written;
 
-        if (fdtofil[file_handle] != (FIL*)0) {
+        if (fdtofil[file_handle] != NO_FIL) {
             fres = f_lseek(fdtofil[file_handle], position);
             if (fres != FR_OK) { CLogger::Get ()->Write (FromKernel, LogDebug, "f_lseek failed!\r\n"); return -1; }
             return position; // TODO: real position may be different?
@@ -388,7 +393,7 @@ public:
     
     int tell(int file_handle)
     {
-        if (fdtofil[file_handle] != (FIL*)0) {
+        if (fdtofil[file_handle] != NO_FIL) {
             return f_tell(fdtofil[file_handle]);
         } else { CLogger::Get ()->Write (FromKernel, LogDebug, "fd not found!\r\n"); return -1; }
 
@@ -407,10 +412,26 @@ public:
         return strerror(code);
     }
 
+    bool shutdown()
+    {
+        bool ok = true;
+        for (int i = 0; i < MAX_OPEN_FILES; i++)
+        {
+            FIL *fil = fdtofil[i];
+            if (fil != NO_FIL)
+            {
+                FRESULT fres = f_close(fil);  // f_close calls f_sync internally
+                if (fres != FR_OK) ok = false;
+                fdtofil[i] = NO_FIL;
+            }
+        }
+        return ok;
+    }
+
 private:
     std::string root_directory;
 
-    FIL *fdtofil[100];
+    FIL *fdtofil[MAX_OPEN_FILES];
     int curfd;
 
 };

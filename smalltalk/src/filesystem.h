@@ -73,6 +73,9 @@ public:
     virtual const int last_error() = 0;
     virtual const char *error_text(int code) = 0;
 
+    // Shutdown
+    virtual bool shutdown() = 0;
+
 };
 
 
