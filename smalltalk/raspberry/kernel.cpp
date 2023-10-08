@@ -19,12 +19,34 @@
 
 #include "kernel.h"
 #include <assert.h>
+#include <circle/net/ntpdaemon.h>
 #include <circle/usb/usbkeyboard.h>
 #include <circle/string.h>
 #include <circle/util.h>
 #include <smalltalk.h>
 
 #define EXPAND_CHARACTERS
+
+
+#define TIMER_TEST
+
+#ifdef TIMER_TEST
+#include <time.h>
+#endif
+
+// Network configuration
+#define USE_DHCP
+
+#ifndef USE_DHCP
+static const u8 IPAddress[]      = {192, 168, 0, 250};
+static const u8 NetMask[]        = {255, 255, 255, 0};
+static const u8 DefaultGateway[] = {192, 168, 0, 1};
+static const u8 DNSServer[]      = {192, 168, 0, 1};
+#endif
+
+// Time configuration
+static const char NTPServer[]    = "pool.ntp.org";
+static const int nTimeZone       = 0*60;           // minutes diff to UTC, ST-80 handles timezone in its Time class
 
 #define PARTITION       "emmc1-1"
 
@@ -40,9 +62,14 @@ CKernel::CKernel (void)
         m_Timer (&m_Interrupt),
 	m_Logger (m_Options.GetLogLevel ()),
         m_USBHCI (&m_Interrupt, &m_Timer),
+//      m_USBHCI (&m_Interrupt, &m_Timer, TRUE)         // TRUE: enable plug-and-play
+#ifndef USE_DHCP
+	m_Net (IPAddress, NetMask, DefaultGateway, DNSServer),
+#endif
         m_EMMC (&m_Interrupt, &m_Timer, &m_ActLED),
 	m_nPosX (0), m_nPosY (0),
-	m_nBootMode (m_Options.GetBootMode ())
+	m_nBootMode (m_Options.GetBootMode ()),
+	m_NTPSyncInterval (m_Options.GetNTPSyncIntervalMinutes ())
 {
 	s_pThis = this;
 
@@ -102,6 +129,11 @@ boolean CKernel::Initialize (void)
 		bOK = m_USBHCI.Initialize ();
 	}
 
+	if (m_NTPSyncInterval >= 0 && bOK)
+	{
+		bOK = m_Net.Initialize (FALSE);         // FALSE: do not wait for network to appear
+        }
+
         if (bOK)
         {
                 bOK = m_EMMC.Initialize ();
@@ -119,8 +151,10 @@ void CKernel::smalltalk (void)
 	vm_options.root_directory = "/";
 	vm_options.three_buttons = true;
 	vm_options.vsync = false;
-	vm_options.novsync_delay = 0;  // Try -delay 8 arg if your CPU is unhappy
-	vm_options.cycles_per_frame = 1800;
+	vm_options.novsync_delay = m_Options.GetNoVSyncDelay();
+		// Try -delay 8 arg if your CPU is unhappy
+	vm_options.cycles_per_frame = m_Options.GetCyclesPerFrame();
+		// 1800;
 	vm_options.display_scale = 1;
 
 	VirtualMachine *vm = new VirtualMachine(vm_options, m_Screen);
@@ -142,6 +176,8 @@ TShutdownMode CKernel::Run (void)
 {
 	m_Logger.Write (FromKernel, LogNotice, "Compile time: " __DATE__ " " __TIME__);
 
+	m_Timer.SetTimeZone (nTimeZone);
+
         CUSBKeyboardDevice *pKeyboard = (CUSBKeyboardDevice *) m_DeviceNameService.GetDevice ("ukbd1", FALSE);
         if (pKeyboard == 0)
         {
@@ -151,13 +187,9 @@ TShutdownMode CKernel::Run (void)
         }
 
 	// pKeyboard->RegisterRemovedHandler (KeyboardRemovedHandler);
-#ifdef USE_COOKED_KEYBOARD
 	m_pKeyboard = pKeyboard;
-	// pKeyboard->RegisterShutdownHandler (ShutdownHandler);
+	// pKeyboard->RegisterShutdownHandler (ShutdownHandler);  // invoked on <Ctrl>+<Alt>+<Del>
         pKeyboard->RegisterKeyPressedHandler (KeyPressedHandlerStub);
-#else
-        pKeyboard->RegisterKeyStatusHandlerRaw (KeyStatusHandlerRawStub);
-#endif
 
 	CMouseDevice *pMouse = (CMouseDevice *) m_DeviceNameService.GetDevice ("mouse1", FALSE);
 	if (pMouse == 0)
@@ -190,25 +222,58 @@ TShutdownMode CKernel::Run (void)
                 CLogger::Get ()->Write ("ObjectMemory", LogDebug, "Cannot mount drive: %s", "sd:");
         }
 
+#ifdef TIMER_TEST
+	CLogger::Get ()->Write ("RTCTest", LogDebug, "*** Begin RTC Test");
+	unsigned u1 = GetTicks();
+	CLogger::Get ()->Write ("RTCTest", LogDebug, "GetTicks A: %u", u1);
+	SleepMs(5000);
+	unsigned u2 = GetTicks();
+	CLogger::Get ()->Write ("RTCTest", LogDebug, "GetTicks B: %u", u2);
+	SleepMs(5000);
+	unsigned u3 = m_Timer.GetTime();
+	CLogger::Get ()->Write ("RTCTest", LogDebug, "GetTime A: %u", u3);
+	SleepMs(5000);
+	unsigned u4 = m_Timer.GetTime();
+	CLogger::Get ()->Write ("RTCTest", LogDebug, "GetTime B: %u", u4);
+	SleepMs(5000);
+	unsigned u5 = (unsigned) time(0);
+	CLogger::Get ()->Write ("RTCTest", LogDebug, "libc time A: %u", u5);
+	SleepMs(5000);
+	unsigned u6 = (unsigned) time(0);
+	CLogger::Get ()->Write ("RTCTest", LogDebug, "libc time B: %u", u6);
+	CLogger::Get ()->Write ("RTCTest", LogDebug, "*** End RTC Test");
+	SleepMs(5000);
+#endif
+
+	if (m_NTPSyncInterval >= 0)
+	{
+		new CNTPDaemon (NTPServer, &m_Net, 60 * m_NTPSyncInterval);
+#ifdef TIMER_TEST
+		CLogger::Get ()->Write ("RTCTest", LogDebug, "Click Left Mouse Button to launch smalltalk");
+		while (!(m_nButtons & 0x01))
+	       	{
+			unsigned u7 = m_Timer.GetTime();
+			CLogger::Get ()->Write ("RTCTest", LogDebug, "GetTime: %u", u7);
+			unsigned u8 = (unsigned) time(0);
+			CLogger::Get ()->Write ("RTCTest", LogDebug, "libc time: %u", u8);
+			SleepMs(2500);
+		}
+#endif
+	}
 	m_Logger.Write (FromKernel, LogDebug, "Starting smalltalk");
 	smalltalk();
 	m_Logger.Write (FromKernel, LogDebug, "Ending smalltalk");
-
-	m_Screen.Write (ClearScreen, sizeof ClearScreen-1);
 
 #if 1
 	for (unsigned nCount = 0; m_ShutdownMode == ShutdownNone; nCount++)
 	{
 		pMouse->UpdateCursor ();
-
-#ifdef USE_COOKED_KEYBOARD
-		pKeyboard->UpdateLEDs ();  // required to make Caps Lock LED reflect the key state
-#endif
-
+		pKeyboard->UpdateLEDs ();  // do we still need to update the Caps Lock LED in this stage?
 		m_Screen.Rotor (0, nCount);
 	}
 #endif
 
+	m_Screen.Write (ClearScreen, sizeof ClearScreen-1);
 	m_Screen.Write(GoodByeMessage, sizeof GoodByeMessage-1);
 	return m_ShutdownMode;
 }
@@ -240,39 +305,6 @@ void CKernel::KeyPressedHandler (const char *pString)
 #endif
 }
 
-void CKernel::KeyStatusHandlerRawStub (unsigned char ucModifiers, const unsigned char RawKeys[6])
-{
-        assert (s_pThis != 0);
-        s_pThis->KeyStatusHandlerRaw (ucModifiers, RawKeys);
-}
-
-void CKernel::KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned char RawKeys[6])
-{
-        assert (s_pThis != 0);
-
-#ifdef LOG_KEYBOARD
-        CString Message;
-        Message.Format ("Key status (modifiers %02X)", (unsigned) ucModifiers);
-#endif
-
-        for (unsigned i = 0; i < 6; i++)
-        {
-                if (RawKeys[i] != 0)
-                {
-#ifdef LOG_KEYBOARD
-                        CString KeyCode;
-                        KeyCode.Format (" %02X", (unsigned) RawKeys[i]);
-                        Message.Append (KeyCode);
-#endif
-                        m_RawKeys[i] = RawKeys[i] | ((ucModifiers & 0xff) << 8);
-                }
-        }
-
-#ifdef LOG_KEYBOARD
-        s_pThis->m_Logger.Write (FromKernel, LogNotice, Message);
-#endif
-}
-
 void CKernel::MouseEventHandler (TMouseEvent Event, unsigned nButtons, unsigned nPosX, unsigned nPosY, int nWheelMove)
 {
 		m_nPosX = nPosX;
@@ -294,6 +326,10 @@ void CKernel::MouseEventHandler (TMouseEvent Event, unsigned nButtons, unsigned 
 				m_nButtons = m_nButtons & ~0x02;
 			if (nButtons & MOUSE_BUTTON_RIGHT)
 				m_nButtons = m_nButtons & ~0x04;
+			break;
+		case MouseEventMouseMove:
+		case MouseEventMouseWheel:  // TODO can we trigger scrolling with this somehow?
+		case MouseEventUnknown:
 			break;
         }
 }
@@ -357,19 +393,17 @@ unsigned CKernel::GetTicks (void) {
 	return t;
 }
 
-int CKernel::GetKeyboardState (unsigned *keys) {
-	int n = 0;
-        for (unsigned i = 0; i < 6; i++)
-        {
-                if (m_RawKeys[i] != 0)
-                {
-                        *keys = m_RawKeys[i];
-			keys++;
-			n++;
-                        m_RawKeys[i] = 0;
-                }
-        }
-	return n;
+unsigned CKernel::GetEpochTime (void) {
+	unsigned t = m_Timer.GetTime();
+	return t;
+}
+
+extern "C" unsigned syscall_gettimeofday (void) {
+	CKernel *ckp = CKernel::Get();
+	if (ckp == 0)
+		return 0;
+	else
+		return ckp->GetEpochTime();
 }
 
 void CKernel::GetCookedKeyboardKey (char *keySeq) {
@@ -378,9 +412,7 @@ void CKernel::GetCookedKeyboardKey (char *keySeq) {
 }
 
 void CKernel::UpdateKeyboardLEDs (void) {
-#ifdef USE_COOKED_KEYBOARD
 	m_pKeyboard->UpdateLEDs();
-#endif
 }
 
 void CKernel::SetMouseState (int x, int y) {
@@ -394,5 +426,9 @@ unsigned CKernel::GetCursorType (void) {
 
 unsigned CKernel::GetCursorColor (void) {
    return m_CursorColor;
+}
+
+void CKernel::SleepMs (unsigned ms) {
+	m_Scheduler.MsSleep(ms);
 }
 

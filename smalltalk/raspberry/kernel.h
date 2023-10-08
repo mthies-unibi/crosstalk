@@ -31,16 +31,14 @@
 #include <circle/timer.h>
 #include <circle/logger.h>
 #include <circle/usb/usbhcidevice.h>
+#include <circle/sched/scheduler.h>
+#include <circle/net/netsubsystem.h>
 #include <circle/input/mouse.h>
 #include <SDCard/emmc.h>
 #include <fatfs/ff.h>
 #include <circle/types.h>
 
-
-#define USE_COOKED_KEYBOARD  // experimental (mthies)
-#ifdef USE_COOKED_KEYBOARD
-#include <circle/usb/usbkeyboard.h>
-#endif
+#include <circle/usb/usbkeyboard.h>  // required by cooked keyboard handling
 
 enum TShutdownMode
 {
@@ -63,21 +61,21 @@ public:
 	CMouseDevice *GetMouseDevice (void);
 
         void GetMouseState (int *x, int *y, unsigned *buttons);
-	int GetKeyboardState (unsigned *keys);
 	void GetCookedKeyboardKey (char *keySeq);
 	void UpdateKeyboardLEDs (void);
 	unsigned GetTicks (void);
+	unsigned GetEpochTime (void);
 
         void SetMouseState (int x, int y);
 
 	unsigned GetCursorType (void);
 	unsigned GetCursorColor (void);
 
+	void SleepMs (unsigned);
+
 private:
         static void KeyPressedHandlerStub (const char *pString);
         void KeyPressedHandler (const char *pString);
-        static void KeyStatusHandlerRawStub (unsigned char ucModifiers, const unsigned char RawKeys[6]);
-        void KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned char RawKeys[6]);
 
 	static void MouseEventStub (TMouseEvent Event, unsigned nButtons, unsigned nPosX, unsigned nPosY, int nWheelMove);
 	void MouseEventHandler (TMouseEvent Event, unsigned nButtons, unsigned nPosX, unsigned nPosY, int nWheelMove);
@@ -99,6 +97,8 @@ private:
 	CTimer			m_Timer;
 	CLogger			m_Logger;
 	CUSBHCIDevice		m_USBHCI;
+	CScheduler              m_Scheduler;
+	CNetSubSystem           m_Net;
         CEMMCDevice             m_EMMC;
         FATFS                   m_FileSystem;
 
@@ -111,9 +111,8 @@ private:
 	unsigned m_CursorColor = 0;
 
 	unsigned m_nBootMode = 0;
+	int m_NTPSyncInterval = -1;
 
-        int m_RawKeys[6] = {0};
-	// TODO need only either the one abover or the one below, depending on USE_COOKED_KEYBOARD
 	CUSBKeyboardDevice *m_pKeyboard;
 	char m_CookedKeySeq[6] = {0};  // special keys report sequences of up to 6 characters like <ESC>[12~<NUL>
 

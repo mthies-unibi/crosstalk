@@ -28,9 +28,10 @@
 
 static const char FromNTPDaemon[] = "ntpd";
 
-CNTPDaemon::CNTPDaemon (const char *pNTPServer, CNetSubSystem *pNetSubSystem)
+CNTPDaemon::CNTPDaemon (const char *pNTPServer, CNetSubSystem *pNetSubSystem, unsigned resyncSeconds)
 :	m_NTPServer (pNTPServer),
-	m_pNetSubSystem (pNetSubSystem)
+	m_pNetSubSystem (pNetSubSystem),
+	m_resyncSeconds(resyncSeconds)
 {
 	assert (m_pNetSubSystem != 0);
 
@@ -47,6 +48,8 @@ void CNTPDaemon::Run (void)
 	while (1)
 	{
 		unsigned nSecondsToNextAttempt = UpdateTime ();
+		if (nSecondsToNextAttempt == 0)
+			break;  // implements sync just once after start up
 		
 		CScheduler::Get ()->Sleep (nSecondsToNextAttempt);
 	}
@@ -55,6 +58,11 @@ void CNTPDaemon::Run (void)
 unsigned CNTPDaemon::UpdateTime (void)
 {
 	assert (m_pNetSubSystem != 0);
+
+	if (!m_pNetSubSystem->IsRunning())
+	{
+		return 15;
+	}
 
 	CIPAddress NTPServerIP;
 	CDNSClient DNSClient (m_pNetSubSystem);
@@ -85,5 +93,5 @@ unsigned CNTPDaemon::UpdateTime (void)
 		CLogger::Get ()->Write (FromNTPDaemon, LogWarning, "Cannot update system time");
 	}
 
-	return 900;
+	return m_resyncSeconds;
 }

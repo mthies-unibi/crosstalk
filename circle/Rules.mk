@@ -122,8 +122,8 @@ $(error AARCH must be set to 32 or 64)
 endif
 
 ifeq ($(strip $(STDLIB_SUPPORT)),3)
-# LIBC       = "$(shell $(CPP) $(ARCH) -print-file-name=libc.a)"
-LIBC       = "$(shell $(CPP) -marm -print-file-name=libc.a)"
+LIBC       = "$(shell $(CPP) $(ARCH) -print-file-name=libc.a)"
+# LIBC       = "$(shell $(CPP) -marm -print-file-name=libc.a)"
 EXTRALIBS += $(LIBC)
 LIBSTDCPP = "$(shell $(CPP) $(ARCH) -print-file-name=libstdc++.a)"
 EXTRALIBS += $(LIBSTDCPP)

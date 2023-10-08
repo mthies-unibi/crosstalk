@@ -8,6 +8,13 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 
+#ifdef BROKEN_GETTIMEOFDAY
+#include <circle/bcm2835.h>
+#else
+// use circle's GetTime so that NTP affects the C library time() function
+extern unsigned syscall_gettimeofday(void);
+#endif
+
 void _exit(int status) {
     while(1);
 }
@@ -62,9 +69,17 @@ int _close(int file) {
 }
 
 int _gettimeofday(struct timeval *tv, struct timezone *tz) {
-    uint64_t t = *((uint64_t *)0x20003004);  // get uptime in nanoseconds
+#ifdef BROKEN_GETTIMEOFDAY
+    // uint64_t t = *((uint64_t *)0x20003004);  // get uptime in nanoseconds
+    uint64_t t = *((uint64_t *)ARM_SYSTIMER_CLO);  // get uptime in nanoseconds
     tv->tv_sec = t / 1000000;  // convert to seconds
     tv->tv_usec = ( t % 1000000 ) / 1000;  // get remaining microseconds
+#else
+    tv->tv_sec = syscall_gettimeofday();
+    tv->tv_usec = 0;
+#endif
+    // TODO better delegate to GetEpochTime();
+    // TODO fill in *tz with GMT 0 info, if non-NULL
     return 0;  // return non-zero for error
 }
 

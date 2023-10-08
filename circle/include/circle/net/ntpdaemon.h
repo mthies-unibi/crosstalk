@@ -28,7 +28,8 @@ class CNTPDaemon : public CTask
 {
 public:
 	CNTPDaemon (const char	  *pNTPServer,		// Hostname
-		    CNetSubSystem *pNetSubSystem);
+		    CNetSubSystem *pNetSubSystem,
+		    unsigned resyncSeconds);
 	~CNTPDaemon (void);
 
 	void Run (void);
@@ -39,6 +40,7 @@ private:
 private:
 	CString		 m_NTPServer;
 	CNetSubSystem	*m_pNetSubSystem;
+	unsigned         m_resyncSeconds;
 };
 
 #endif
