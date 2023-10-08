@@ -1301,8 +1301,11 @@ private:
     
     inline float extractFloat(int objectPointer)
     {
-        std::uint32_t uint32 = (memory.fetchWord_ofObject(1, objectPointer) << 16) | memory.fetchWord_ofObject(0, objectPointer);
-        return * (float *) &uint32;
+        // std::uint32_t uint32 = (memory.fetchWord_ofObject(1, objectPointer) << 16) | memory.fetchWord_ofObject(0, objectPointer);
+        // return * (float *) &uint32;
+        union { std::uint32_t uint32; float flt; } punner;
+        punner.uint32 = (memory.fetchWord_ofObject(1, objectPointer) << 16) | memory.fetchWord_ofObject(0, objectPointer);
+        return punner.flt;
     }
 
     float popFloat();

@@ -80,19 +80,28 @@ public:
         vm_options(vm_options),
         fileSystem(vm_options.root_directory),
         interpreter(this, &fileSystem),
+        last_event_time(0),
+        event_count(0),
+        input_semaphore(0),
+        quit_signalled(false),
+        texture_needs_update(false),
         display_width(0), display_height(0),
-        scheduled_semaphore(0), input_semaphore(0), scheduled_time(0),
-        event_count(0), last_event_time(0),
-        quit_signalled(false), texture_needs_update(false),
+        scheduled_semaphore(0),
+        scheduled_time(0),
         image_name(vm_options.snapshot_name),
-        m_Screen(m_Screen), ticks(0),
-	old_mouseX(0), old_mouseY(0),
-        capslock_down(false)
+        m_Screen(m_Screen),
+        ticks(0),
+	old_mouseX(0), old_mouseY(0)
     {
     }
-    
-    ~VirtualMachine()
+
+    virtual ~VirtualMachine()
     {
+      bool ok = fileSystem.shutdown();
+      if (!ok)
+      {
+        CLogger::Get ()->Write ("vm", LogDebug, "dtor: fs shutdown failed");
+      }
     }
 
     void set_input_semaphore(int semaphore);
@@ -162,5 +171,4 @@ private:
     std::uint16_t MyCursorSymbol[16] = {0};
     std::uint16_t MyMouseBackground[32];
     int old_mouseX, old_mouseY;
-    bool capslock_down;
 };

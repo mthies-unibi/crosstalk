@@ -354,10 +354,9 @@ public:
                                                                   int stop,
                                                                   bool displaying);
     
-    int stopConditions;
     int xTable;
     int lastIndex;
-
+    int stopConditions;
     
 };
 

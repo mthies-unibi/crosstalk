@@ -274,6 +274,7 @@ bool ObjectMemory::loadSnapshot(IFileSystem *fileSystem, const char *fileName)
     switch (bootmode) {
         case 0:
             CLogger::Get ()->Write ("objmemory", LogDebug, "Loading in-memory snapshot");
+            fd = -1;  //may not actually be used by the code below
             break;
         case 1:
         case 2:
@@ -292,7 +293,7 @@ bool ObjectMemory::loadSnapshot(IFileSystem *fileSystem, const char *fileName)
     }
 
     if (bootmode == 2) { // #if LOAD_FAST_FROM_SD
-        if (fileSystem->file_size(fd) > sizeof(___files_snapshot_im)) {
+        if (((unsigned) fileSystem->file_size(fd)) > sizeof(___files_snapshot_im)) {
             CLogger::Get ()->Write ("objmemory", LogDebug, "Snapshot file %s too large", fileName);
             return false;
         }

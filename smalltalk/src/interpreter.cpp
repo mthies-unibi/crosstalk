@@ -41,12 +41,14 @@ inline bool between_and(int value, int min, int max )
     return value >= min && value <= max;
 }
 
-Interpreter::Interpreter(IHardwareAbstractionLayer *halInterface, IFileSystem *fileSystemInterface) : hal(halInterface), fileSystem(fileSystemInterface),
+Interpreter::Interpreter(IHardwareAbstractionLayer *halInterface, IFileSystem *fileSystemInterface) :
 #ifdef GC_MARK_SWEEP
-   memory(halInterface, this)
+   memory(halInterface, this),
 #else
-   memory(halInterface)
+   memory(halInterface),
 #endif
+   hal(halInterface),
+   fileSystem(fileSystemInterface)
 {
 }
 
@@ -3165,7 +3167,7 @@ void Interpreter::initializeMethodCache()
    	methodCacheSize <- 1024.
    	methodCache <- Array new: methodCacheSize
    */
-    for(int i = 0; i < sizeof(methodCache)/sizeof(methodCache[0]); i++)
+    for(unsigned i = 0; i < sizeof(methodCache)/sizeof(methodCache[0]); i++)
         methodCache[i] = NilPointer;
 }
 
@@ -5505,10 +5507,12 @@ void Interpreter::dispatchStorageManagementPrimitives()
 
 void Interpreter::pushFloat(float f)
 {
-    std::uint32_t uint32 = *(std::uint32_t *) &f;
+    union { std::uint32_t uint32; float flt; } punner;
+    punner.flt = f;
+    // std::uint32_t uint32 = *(std::uint32_t *) &f;
     int objectPointer = memory.instantiateClass_withWords(ClassFloatPointer, 2);
-    memory.storeWord_ofObject_withValue(0, objectPointer, uint32 & 0xffff);
-    memory.storeWord_ofObject_withValue(1, objectPointer, uint32 >> 16);
+    memory.storeWord_ofObject_withValue(0, objectPointer, punner.uint32 & 0xffff);
+    memory.storeWord_ofObject_withValue(1, objectPointer, punner.uint32 >> 16);
 
     push(objectPointer);
 }
