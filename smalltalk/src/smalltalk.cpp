@@ -30,17 +30,15 @@
 #include <sstream>
 #include <cassert>
 #include <stdlib.h>
-#include <time.h>
+/* #include <time.h> */
 #include "smalltalk.h"
 #include "interpreter.h"
 #include "fatfilesystem.h"
 #include "hal.h"
 #include <queue>
 
-#include "usb_hid_keys.h"
-
-
-#define GERMAN_RPI400_KEYBOARD
+#include <circle/sched/scheduler.h>
+/* #include "usb_hid_keys.h" */
 
 typedef std::uint16_t Pixel;
 
@@ -60,7 +58,8 @@ static inline void expand_pixel(Pixel *destPixel, std::uint16_t srcWord, int src
         // Seconds between 1/1/1901 00:00 and 1/1/1970 00:00
 
         const std::uint32_t TIME_OFFSET = 2177452800;
-        time_t unix_epoch_time =  time(0);
+        unsigned unix_epoch_time = CKernel::Get()->GetEpochTime();
+        /* time_t unix_epoch_time =  time(0); */
         return (std::uint32_t) unix_epoch_time + TIME_OFFSET;
     }
     
@@ -181,10 +180,10 @@ static inline void expand_pixel(Pixel *destPixel, std::uint16_t srcWord, int src
         int source_index = 0;
         std::uint16_t source_pixel_l = 0;
         std::uint16_t source_pixel_r = 0;
-        std::uint16_t cursor_pixel_l = 0;
-        std::uint16_t cursor_pixel_r = 0;
+        /* std::uint16_t cursor_pixel_l = 0; */
+        /* std::uint16_t cursor_pixel_r = 0; */
 
-        int hoffset = m_x % 16;
+        /* int hoffset = m_x % 16; */
 
         // restore prev background
         for (int v=0; v<16; v++) {
@@ -290,7 +289,7 @@ static inline void expand_pixel(Pixel *destPixel, std::uint16_t srcWord, int src
         assert(x + width <= display_width);
         assert(y + height <= display_height);
         
-        if ((&dirty_rect == 0) || dirty_rect.w == 0 || dirty_rect.h == 0)
+        if (/* (&dirty_rect == 0) || */ dirty_rect.w == 0 || dirty_rect.h == 0)
         {
             dirty_rect.x = x;
             dirty_rect.y = y;
@@ -418,200 +417,17 @@ static inline void expand_pixel(Pixel *destPixel, std::uint16_t srcWord, int src
      of the character on the keytop without shift or control information (i.e., the key with “A”
      on it produces the ASCII for  “a” and the key with “2” and “@“ on it produces the ASCII for “2”).
      */
-    void VirtualMachine::handle_keyboard_event(int key)
-    {
-#ifdef GERMAN_RPI400_KEYBOARD
-        static char scantoascii[128] = {  // only indexed with param, if param < 128
-            0,   0,   0,   0,   'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
-            'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'z', 'y', '1', '2',
-            '3', '4', '5', '6', '7', '8', '9', '0',  13,  27,   8,  10,  32, '?', '`', 'u',
-            '+', '#', '~', 'o', 'a', '^', ',', '.', '-', 'A', 'B', 'C', 'D', 'E', 'F', 'G',
-            'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 127, 'U', 'V', 'W',
-            'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
-            'n', 'o', 'p', 'q', '<', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2',
-            '3', '4', '5', '6', '7', '8', '9', '!', '"', '@', '$', '%', '&', '/', '(', ')'
-            // the repeated letters 'A' .. 'Z', 'a' .. 'z' digits and shifted digits
-            // are only there to get better visual feedback for unexpected keycodes arriving
-            // within this block are two relevant keys: '<' left of 'y' at scancode 0x64
-            // and <DEL> forward delete at scancode 0x4c
-            // the '~' after '#' at scancode 0x32 has not been pbserved yet with the German layout
-        };
-        // replaces invalid non-ASCII characters °, §, ß, ´ with the "other" valid
-        // character on the same key ^, @, ?, `
-        // unlauts are replaced with their base letter, but not ß to make shifted ß into ?
-        //
-        // TODO strange TAB key is listed with code 10 not 9, seems to select last input chunk, like <ESC> does
-        //
-        // still wrong:
-        // FIXED < key --> black box
-        // FIXED all Alt combinations
-        // WORK AROUND after pressing Ctrl all input yields black boxes, Ctrl key remains pressed?
-        //
-        // first try wrong
-        // y <--> z  ß --> -/_  ´ --> =/+  ^ --> `/~  ü --> [  + --> ]
-        // ö --> ;/:  ä --> '/'  # --> \/|  < --> NUL  , --> ,/<  . --> ./>  - --> //?
-        // TODO add support for German RPi keyboard with right Alt key for
-        // brackets, braces etc. as printed on the keycaps
-
-        // Map between a key scan code and it's shifted key value (if any)
-        static char shift_map[128] = {
-            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-            11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
-            21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
-            31, ' ', '!', '"', '\'', '$', '%', '&', '\'', '(',
-            ')', '*', '*', ';', '_', ':', '/', '=', '!', '"',
-            '@', '$', '%', '&', '/', '(', ')', ':', ';', '>',
-            '=', '>', '?', '@', 'A', 'B', 'C', 'D', 'E', 'F',
-            'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
-            'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-            '[', '\\', ']', '^', '_', '`', 'A', 'B', 'C', 'D',
-            'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N',
-            'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X',
-            'Y', 'Z', '{', '|', '}', '~', 127
-        };
-#else
-        /* static char scantoascii[256] = { */
-        static char scantoascii[128] = {  // only indexed with param, if param < 128
-            0,   0,   0,   0,   'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
-            'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '1', '2',
-            '3', '4', '5', '6', '7', '8', '9', '0',  13,  27,   8,  10,  32, '-', '=', '[',
-            ']', '\\', '~', ';', '\'', '`', ',', '.', '/',  0
-        };
-
-        // TODO add support for German RPi keyboard with right Alt key for
-        // brackets, braces etc. as printed on the keycaps
-
-        // Map between a key scan code and it's shifted key value (if any)
-        static char shift_map[128] = {
-            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-            11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
-            21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
-            31, ' ', '!', '"', '#', '$', '%', '&', '\'', '(',
-            ')', '*', '+', '<', '_', '>', '?', ')', '!', '@',
-            '#', '$', '%', '^', '&', '*', '(', ':', ':', '<',
-            '+', '>', '?', '@', 'A', 'B', 'C', 'D', 'E', 'F',
-            'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
-            'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-            '{', '|', '}', '^', '_', '~', 'A', 'B', 'C', 'D',
-            'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N',
-            'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X',
-            'Y', 'Z', '{', '|', '}', '~', 127
-        };
-#endif
-        
-        /* std::uint16_t type = 3; */
-        // TODO how to distinguish between key repsses and releases? type == 3 versus type == 4
-        std::uint16_t param = 0;
-        /*
-         left shift 136 right shift 137 control 138 alpha-lock 139
-         backspace 8 tab 9 line feed 10 return 13 escape 27 space 32 delete 127
-         */
-
-        // My initial plan was to use go unencoded for everything, but
-        // when I pressed shift 6, I saw a ~ appear!. It turns out the
-        // ALTO keyboard has ~ above 6!
-        // https://www.flickr.com/photos/walkingsf/31415192416
-        
-        /* if (((key >> 8) & 0xff == KEY_MOD_LCTRL) */ 
-        /*  || ((key >> 8) & 0xff == KEY_MOD_RCTRL)) { */
-        // NOTE the above has precedence errors: == evaluated before &
-        /* if ((key >> 8) & 0xff & (KEY_MOD_LCTRL|KEY_MOD_RCTRL)) { */
-        /*     param = 138; */
-        /* } else { */
-            switch (key & 0xff) {
-                /* case KEY_LEFTCTRL: */
-                /* case KEY_RIGHTCTRL: param = 138; break; */
-                // FIXME the below keys only report presses, but are never "released"
-
-                case KEY_CAPSLOCK: param = 139; capslock_down = !capslock_down; break;
-                /* case KEY_DELETE:   param = 127; break; */
-                default:
-                    if ((key & 0xff) > 127)
-                        return;  // Must be ascii
-                                 // wrong: these are USB HID scan codes, not characters yet
-                    param = key & 0x7f;
-                    break;
-            }
-        /* } */
-   
-        if (param < 128)
-        {
-            /* if (type == 3) */
-            {
-                if ((key >> 8) & 0xff & (KEY_MOD_LMETA|KEY_MOD_RMETA))
-                    return; // Ignore left/right GUI modifier key combinations
-
-#ifdef GERMAN_RPI400_KEYBOARD
-                if ((key >> 8) & 0xff & (KEY_MOD_LALT|KEY_MOD_RALT))
-                {  // could limit this to MOD_RALT (AltGr) only, but MOD_LALT has no other uses
-                    param = scantoascii[param];
-                    switch (param) {
-                        case '7': param = '{'; break;
-                        case '8': param = '['; break;
-                        case '9': param = ']'; break;
-                        case '0': param = '}'; break;
-                        case '?': param = '\\'; break;  // really ß (unshifted ?)
-                        case 'q': param = '@'; break;
-                        case '+': param = '~'; break;
-                        case '<': param = '|'; break;
-                        /* case 'd': param = 0x04; break;  // FIXME testing if Ctrl-D can be sent this way */
-                        default: return; // Ignore
-                    }
-                    // would need to add SHIFT processing here,
-                    // if there were any ALT+SHIFT combinations
-                }
-                else
-#endif
-
-                if ((key >> 8) & 0xff & (KEY_MOD_LCTRL|KEY_MOD_RCTRL)) {
-                    param = scantoascii[param];
-                    if ('a' <= param && param <= 'z')
-                    {
-                        // simulate CTRL down, letter down, letter up, CTRL up
-                        queue_input_time_words();
-                        queue_input_word(3, 138);
-                        queue_input_word(3, param);
-                        queue_input_word(4, param);
-                        queue_input_word(4, 138);
-                        return;  // do not report the letter key press and release again
-                    }
-                }
-                else if ((key >> 8) & 0xff & (KEY_MOD_LSHIFT|KEY_MOD_RSHIFT)) {
-                    param = shift_map[scantoascii[param]];
-                }
-                else {
-                    param = scantoascii[param];
-                }
-                
-                /*
-                 For a decoded keyboard, the full shifted and “controlled" ASCII should be
-                 used as a parameter and successive type 3 and 4 words should be produced for each keystroke.
-                 */
-                queue_input_time_words();
-                queue_input_word(3, param);
-                queue_input_word(4, param);
-                // TODO maybe do not queue, if param == 0?
-            }
-        }
-        else
-        {
-            // send undecoded
-            queue_input_time_words();
-            queue_input_word(capslock_down ? 3 : 4, param);
-        }
-    }
-    
     void VirtualMachine::handle_cooked_keyboard_key(char *keySeq)
     {
         std::uint16_t param = keySeq[0];
         std::uint16_t ctrl_state = keySeq[1];
-        if (param == 0 || param > 127 || ctrl_state > 3)
+        // if (param == 0 || param > 127 || ctrl_state > 3)
+        if (param == 0 || param > 255 || ctrl_state > 3)
             return;
-        // ignore NUL, non-ASCII characters and special keys mapped to an <ESC> sequence for now
-        // TODO do we need to <Ctrl> characters in a special way
-        // <Enter> sends <LF> 0x0a which selects last text chunk entered (like <ESC>); 0x0d <CR> needs to be sent instead
-        // codes like <Ctrl-D> 0x04 or <Ctrl-F> 0x06 are not recognized by Smalltalk; looks like we need to send 3, 138 3, 'D' 4, 'D' 4, 138 instead?
-        // FIXME anything needed to make Caps Lock and its LED work? Caps Lock works, but LED does not update!
+        // allow special key codes (like 140 for BS2 sent by PrtScn key), although
+        // key codes 141 to 145 are not really interpreted by the ST-80 code?
+        // ignorethe non-key key code 0 and special keys mapped to an <ESC> sequence for now
+        // codes like <Ctrl-D> 0x04 or <Ctrl-F> 0x06 are not recognized by Smalltalk; looks like we need to send 3, 138 3, 'd' 4, 'd' 4, 138 instead
         queue_input_time_words();
         if (ctrl_state & 1)
             queue_input_word(3, 138);
@@ -718,22 +534,11 @@ static inline void expand_pixel(Pixel *destPixel, std::uint16_t srcWord, int src
 
         if (!input_semaphore) return;
 
-        unsigned keys[6]; 
-        int nkeys;
-
-        nkeys = CKernel::Get()->GetKeyboardState(keys);
-
-        if (nkeys > 0) {
-            KeyboardEvent key;
-            for (int i=0; i<nkeys; i++) {
-                handle_keyboard_event(keys[i]);
-            }
-        }
-
         char keySeq[6];
         CKernel::Get()->GetCookedKeyboardKey(keySeq);
         if (keySeq[0])
             handle_cooked_keyboard_key(keySeq);
+        CKernel::Get()->UpdateKeyboardLEDs();
 
         CKernel::Get()->GetMouseState(&x, &y, &mouse_mb);
         x = x - off_x;
@@ -775,9 +580,10 @@ static inline void expand_pixel(Pixel *destPixel, std::uint16_t srcWord, int src
             
             render();
 
-#if 0
+#if 1
             if (!vm_options.vsync && vm_options.novsync_delay > 0)
-                // Delay(vm_options.novsync_delay); // Don't kill CPU
+                /* CScheduler::Get()->MsSleep(vm_options.novsync_delay);  // Don't kill CPU */
+                CKernel::Get()->SleepMs(vm_options.novsync_delay);  // Don't kill CPU
 #endif
         }
     }

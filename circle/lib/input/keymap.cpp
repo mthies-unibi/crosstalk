@@ -58,7 +58,7 @@ const char *CKeyMap::s_KeyStrings[KeyMaxCode-KeySpace] =
 	"\x1b[1;5B",		// KeyCtrlDown
 	"\x1b[1;5D",		// KeyCtrlLeft
 	"\x1b[1;5C",		// KeyCtrlRight
-	"\x1b[[A",		// KeyF1
+	 "\x1b[[A",		// KeyF1
 	"\x1b[[B",		// KeyF2
 	"\x1b[[C",		// KeyF3
 	"\x1b[[D",		// KeyF4
@@ -72,7 +72,8 @@ const char *CKeyMap::s_KeyStrings[KeyMaxCode-KeySpace] =
 	0,			// KeyF12
 	0,			// KeyApplication
 	0,			// KeyCapsLock
-	0,			// KeyPrintScreen
+	// 0,			// KeyPrintScreen
+	"\x8c",			// KeyPrintScreen ==> ST-80 key 140 is mapped to code 158 (BS2) and triggers "leave brackets"
 	0,			// KeyScrollLock
 	0,			// KeyPause
 	0,			// KeyNumLock
@@ -294,7 +295,7 @@ const char *CKeyMap::GetString (u16 nKeyCode, u8 nModifiers, char Buffer[3]) con
 	if (nModifiers & (KEY_LCTRL_MASK | KEY_RCTRL_MASK))
 	{
 		u8 usCtrlMap;
-		if (0 <= chChar /* && chChar < 128i */)
+		if (0 <= chChar /* && chChar < 128 */)
 			usCtrlMap = m_CtrlUSMap[chChar & 0x7f];
 		else
 			usCtrlMap = 0;
