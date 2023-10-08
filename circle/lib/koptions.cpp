@@ -41,7 +41,10 @@ CKernelOptions::CKernelOptions (void)
 	m_bTouchScreenValid (FALSE),
 	m_CursorType (0),
 	m_nCursorColor (0),
-	m_nBootMode (0)
+	m_nBootMode (0),
+	m_CyclesPerFrame (1800),
+	m_NoVSyncDelay(0),
+	m_NTPSyncIntervalMinutes(-1)
 {
 	strcpy (m_LogDevice, "tty1");
 	strcpy (m_KeyMap, DEFAULT_KEYMAP);
@@ -211,6 +214,33 @@ CKernelOptions::CKernelOptions (void)
 				m_nBootMode = nValue;
 			}
 		}
+		else if (strcmp (pOption, "cycles") == 0)
+		{
+			unsigned nValue;
+			if (   (nValue = GetDecimal (pValue)) != INVALID_VALUE
+			    && 100 <= nValue && nValue <= 20000)  // default is 1800, provide generous limits for variations
+			{
+				m_CyclesPerFrame = nValue;
+			}
+		}
+		else if (strcmp (pOption, "nvdelay") == 0)
+		{
+			unsigned nValue;
+			if (   (nValue = GetDecimal (pValue)) != INVALID_VALUE
+			    && 0 <= nValue && nValue <= 1000)  // default is 0, with 8 (ms) as a recommended alternative
+			{
+				m_NoVSyncDelay = nValue;
+			}
+		}
+		else if (strcmp (pOption, "ntp") == 0)
+		{
+			unsigned nValue;
+			if (   (nValue = GetDecimal (pValue)) != INVALID_VALUE
+			    && 0 <= nValue && nValue <= 1440)  // default is -1 (for off), 0 would be just once (after start up), 1440 would be once per day (24h)
+			{
+				m_NTPSyncIntervalMinutes = nValue;
+			}
+		}
 	}
 }
 
@@ -312,6 +342,21 @@ unsigned CKernelOptions::GetCursorColor (void) const
 unsigned CKernelOptions::GetBootMode (void) const
 {
 	return m_nBootMode;
+}
+
+unsigned CKernelOptions::GetCyclesPerFrame (void) const
+{
+	return m_CyclesPerFrame;
+}
+
+unsigned CKernelOptions::GetNoVSyncDelay (void) const
+{
+	return m_NoVSyncDelay;
+}
+
+int CKernelOptions::GetNTPSyncIntervalMinutes (void) const
+{
+	return m_NTPSyncIntervalMinutes;
 }
 
 CKernelOptions *CKernelOptions::Get (void)

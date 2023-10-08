@@ -59,6 +59,10 @@ public:
 
 	unsigned GetBootMode (void) const;
 
+	unsigned GetCyclesPerFrame (void) const;
+	unsigned GetNoVSyncDelay (void) const;
+	int GetNTPSyncIntervalMinutes (void) const;
+
 	static CKernelOptions *Get (void);
 
 private:
@@ -106,6 +110,10 @@ private:
 	unsigned m_nCursorColor;
 
 	unsigned m_nBootMode;
+
+	unsigned m_CyclesPerFrame;
+	unsigned m_NoVSyncDelay;
+	int m_NTPSyncIntervalMinutes;
 
 	static CKernelOptions *s_pThis;
 };

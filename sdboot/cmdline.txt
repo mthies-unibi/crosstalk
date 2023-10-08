@@ -1,1 +1,1 @@
-logdev=screen loglevel=4 cursorcolor=00ff0000 bootmode=2 width=1280 height=720 keymap=DE
+logdev=screen loglevel=4 bootmode=2 ntp=0 width=1280 height=720 keymap=DE
