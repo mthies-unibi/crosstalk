@@ -41,6 +41,7 @@ private:
 	CString		 m_NTPServer;
 	CNetSubSystem	*m_pNetSubSystem;
 	unsigned         m_resyncSeconds;
+	unsigned	 m_attempt;
 };
 
 #endif

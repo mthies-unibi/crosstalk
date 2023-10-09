@@ -31,7 +31,8 @@ static const char FromNTPDaemon[] = "ntpd";
 CNTPDaemon::CNTPDaemon (const char *pNTPServer, CNetSubSystem *pNetSubSystem, unsigned resyncSeconds)
 :	m_NTPServer (pNTPServer),
 	m_pNetSubSystem (pNetSubSystem),
-	m_resyncSeconds(resyncSeconds)
+	m_resyncSeconds(resyncSeconds),
+	m_attempt(0)
 {
 	assert (m_pNetSubSystem != 0);
 
@@ -59,8 +60,16 @@ unsigned CNTPDaemon::UpdateTime (void)
 {
 	assert (m_pNetSubSystem != 0);
 
+	m_attempt += 1;
+	if (m_attempt > 20)
+	{
+		CLogger::Get ()->Write (FromNTPDaemon, LogWarning, "Daemon exits after too many failed attempts");
+		return 0;  // give up after 5 minutes, if the network did not come up, DNS or NTP failed
+	}
+
 	if (!m_pNetSubSystem->IsRunning())
 	{
+		CLogger::Get ()->Write (FromNTPDaemon, LogNotice, "Net subsystem not running yet");
 		return 15;
 	}
 
@@ -71,7 +80,7 @@ unsigned CNTPDaemon::UpdateTime (void)
 		CLogger::Get ()->Write (FromNTPDaemon, LogWarning, "Cannot resolve: %s",
 					(const char *) m_NTPServer);
 
-		return 300;
+		return 30;
 	}
 	
 	CNTPClient NTPClient (m_pNetSubSystem);
@@ -81,7 +90,7 @@ unsigned CNTPDaemon::UpdateTime (void)
 		CLogger::Get ()->Write (FromNTPDaemon, LogWarning, "Cannot get time from %s",
 					(const char *) m_NTPServer);
 
-		return 300;
+		return 30;
 	}
 
 	if (CTimer::Get ()->SetTime (nTime, FALSE))
@@ -93,5 +102,6 @@ unsigned CNTPDaemon::UpdateTime (void)
 		CLogger::Get ()->Write (FromNTPDaemon, LogWarning, "Cannot update system time");
 	}
 
+	m_attempt = 0;  // restart patience after successfull NTP retrieval
 	return m_resyncSeconds;
 }

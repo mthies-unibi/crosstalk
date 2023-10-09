@@ -582,8 +582,14 @@ static inline void expand_pixel(Pixel *destPixel, std::uint16_t srcWord, int src
 
 #if 1
             if (!vm_options.vsync && vm_options.novsync_delay > 0)
+            {
                 /* CScheduler::Get()->MsSleep(vm_options.novsync_delay);  // Don't kill CPU */
                 CKernel::Get()->SleepMs(vm_options.novsync_delay);  // Don't kill CPU
+            }
+            else
+            {
+                CKernel::Get()->Yield();  // give up CPU for NTP sync daemon
+            }
 #endif
         }
     }

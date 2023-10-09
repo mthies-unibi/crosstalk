@@ -28,7 +28,7 @@
 #define EXPAND_CHARACTERS
 
 
-#define TIMER_TEST
+// #define TIMER_TEST
 
 #ifdef TIMER_TEST
 #include <time.h>
@@ -432,3 +432,6 @@ void CKernel::SleepMs (unsigned ms) {
 	m_Scheduler.MsSleep(ms);
 }
 
+void CKernel::Yield (void) {
+	m_Scheduler.Yield();
+}

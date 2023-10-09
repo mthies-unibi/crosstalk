@@ -72,6 +72,7 @@ public:
 	unsigned GetCursorColor (void);
 
 	void SleepMs (unsigned);
+	void Yield (void);
 
 private:
         static void KeyPressedHandlerStub (const char *pString);
