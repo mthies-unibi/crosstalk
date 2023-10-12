@@ -26,6 +26,9 @@
 #include <circle/logger.h>
 #include <assert.h>
 
+
+// #define VERBOSE_LOGGING  // also log normal progress or behavior
+
 static const char FromNTPDaemon[] = "ntpd";
 
 CNTPDaemon::CNTPDaemon (const char *pNTPServer, CNetSubSystem *pNetSubSystem, unsigned resyncSeconds)
@@ -69,7 +72,9 @@ unsigned CNTPDaemon::UpdateTime (void)
 
 	if (!m_pNetSubSystem->IsRunning())
 	{
+#ifdef VERBOSE_LOGGING
 		CLogger::Get ()->Write (FromNTPDaemon, LogNotice, "Net subsystem not running yet");
+#endif
 		return 15;
 	}
 
@@ -95,7 +100,10 @@ unsigned CNTPDaemon::UpdateTime (void)
 
 	if (CTimer::Get ()->SetTime (nTime, FALSE))
 	{
+		// TODO maybe we can write a message to the ST-80 transcript instead?
+#ifdef VERBOSE_LOGGING
 		CLogger::Get ()->Write (FromNTPDaemon, LogNotice, "System time updated");
+#endif
 	}
 	else
 	{

@@ -291,7 +291,9 @@ TDHCPStatus CDHCPClient::SelectAndRequest (void)
 	IPAddress.Set (m_nOwnIPAddress);
 	CString IPString;
 	IPAddress.Format (&IPString);
+#ifdef VERBOSE_LOGGING
 	CLogger::Get ()->Write (FromDHCPClient, LogNotice, "IP address is %s", (const char *) IPString);
+#endif
 
 	assert (m_pNetConfig != 0);
 	m_pNetConfig->SetIPAddress (m_nOwnIPAddress);
