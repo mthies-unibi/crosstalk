@@ -1,6 +1,6 @@
 # Major enhancements compared to the forked version 0.2
 
-- Works on Raspberry Pi 400 (and possibly 4B 8 GB version).  
+- Works on Raspberry Pi 400 and the 4B model with 8 GB of memory.
   Other Raspberry models should also work, but have not been tested.
 - Updated to Circle library version 45.2
 - Improved keyboard handling, including international keyboard layouts supported by Circle library. The layout is set by parameter `keymap=` in `cmdline.txt`.
